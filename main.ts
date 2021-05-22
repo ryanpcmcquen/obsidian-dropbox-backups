@@ -1,5 +1,5 @@
-import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
-import { Dropbox } from "dropbox";
+import { App, Modal, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { Dropbox, DropboxAuth } from "dropbox";
 
 // interface MyPluginSettings {
 //  mySetting: string;
@@ -11,6 +11,9 @@ import { Dropbox } from "dropbox";
 
 export default class DropboxBackups extends Plugin {
     // settings: MyPluginSettings;
+    dbx: Dropbox;
+    dbxAuth: DropboxAuth;
+    clientId = "40ig42vaqj3762d";
 
     async onload() {
         console.log("Loading Dropbox Backups plugin ...");
@@ -32,7 +35,19 @@ export default class DropboxBackups extends Plugin {
             console.log(allFiles);
             console.log(performance.now() - start);
             // @ts-ignore
-            console.log(Dropbox);
+
+            // this.dbx = new Dropbox({ clientId: this.clientId });
+            // console.log(this.dbx);
+
+            this.dbxAuth = new DropboxAuth();
+            this.dbxAuth.setClientId(this.clientId);
+            const authUrl = await this.dbxAuth.getAuthenticationUrl(
+                "app://obsidian.md/index.html"
+            );
+            console.log(authUrl);
+            window.location.assign(String(authUrl));
+            // const response = await this.dbx.filesListFolder({ path: "" });
+            // console.log(response);
         });
 
         // this.addSettingTab(new SampleSettingTab(this.app, this));
