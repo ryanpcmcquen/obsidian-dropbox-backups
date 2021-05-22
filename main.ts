@@ -1,7 +1,6 @@
 import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
-// import { Dropbox } from "dropbox";
-import "./assets/Dropbox-sdk.min.js";
-import "./assets/Dropbox-utils.min.js";
+import { Dropbox } from "dropbox";
+
 // interface MyPluginSettings {
 //  mySetting: string;
 // }
@@ -14,7 +13,7 @@ export default class DropboxBackups extends Plugin {
     // settings: MyPluginSettings;
 
     async onload() {
-        console.log("loading plugin");
+        console.log("Loading Dropbox Backups plugin ...");
 
         // await this.loadSettings();
 
@@ -42,7 +41,7 @@ export default class DropboxBackups extends Plugin {
     }
 
     onunload() {
-        console.log("unloading plugin");
+        console.log("Unloading Dropbox Backups plugin ...");
     }
 
     // async loadSettings() {
