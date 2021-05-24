@@ -109,8 +109,14 @@ export default class DropboxBackups extends Plugin {
         // @ts-ignore
         localStorage.setItem("codeVerifier", this.dbxAuth.codeVerifier);
 
-        window.location.assign(String(authUrl));
-
+        const authFetch = await fetch(authUrl as RequestInfo, {
+            mode: "no-cors",
+        });
+        if (authFetch) {
+            console.log(authFetch);
+        } else {
+            window.location.assign(String(authUrl));
+        }
         this.addRibbonIcon("popup-open", "Backup to Dropbox", async () => {
             await this.backup();
         });
