@@ -20,6 +20,13 @@ export default class DropboxBackups extends Plugin {
             })
         );
     }
+
+    makeEmWait() {
+        return new Promise((resolve) => {
+            return setTimeout(resolve, 1000);
+        });
+    }
+
     async backup() {
         await this.getAllFiles();
         if (this.allFiles && this.allFiles.length > 0) {
@@ -32,13 +39,16 @@ export default class DropboxBackups extends Plugin {
 
             await Promise.all(
                 this.allFiles.map(async (file) => {
-                    return await this.dbx.filesUpload({
+                    const upload = await this.dbx.filesUpload({
                         path: `/${year}/${month}/${now}/${file.path}`,
                         // @ts-ignore
                         mode: "overwrite",
                         mute: true,
                         contents: file.contents,
                     });
+                    console.log(upload);
+                    await this.makeEmWait();
+                    return upload;
                 })
             );
         }
@@ -96,7 +106,7 @@ export default class DropboxBackups extends Plugin {
         this.registerInterval(
             window.setInterval(async () => {
                 await this.backup();
-            }, 60000 * 5)
+            }, 60000 * 15)
         );
 
         await this.backup();
