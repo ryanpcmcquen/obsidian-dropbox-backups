@@ -8,7 +8,20 @@ export default class DropboxBackups extends Plugin {
 
     allFiles: { path: string; contents: string }[];
 
+    async getAllFiles() {
+        const vaultPath = this.app.vault.getName();
+        this.allFiles = await Promise.all(
+            this.app.vault.getFiles().map(async (tfile) => {
+                const fileContents = await this.app.vault.read(tfile);
+                return {
+                    path: `${vaultPath}/${tfile.path}`,
+                    contents: fileContents,
+                };
+            })
+        );
+    }
     async backup() {
+        await this.getAllFiles();
         if (this.allFiles && this.allFiles.length > 0) {
             const now = Date.now();
             // Add 1 because no one thinks of January as 0.
@@ -55,21 +68,12 @@ export default class DropboxBackups extends Plugin {
                 this.dbx = new Dropbox({
                     auth: this.dbxAuth,
                 });
+
+                await this.backup();
             }
         );
 
         this.addRibbonIcon("dice", "Backup to Dropbox", async () => {
-            const vaultPath = this.app.vault.getName();
-            this.allFiles = await Promise.all(
-                this.app.vault.getFiles().map(async (tfile) => {
-                    const fileContents = await this.app.vault.read(tfile);
-                    return {
-                        path: `${vaultPath}/${tfile.path}`,
-                        contents: fileContents,
-                    };
-                })
-            );
-
             this.dbxAuth = new DropboxAuth();
             this.dbxAuth.setClientId(this.clientId);
             const authUrl = await this.dbxAuth.getAuthenticationUrl(
@@ -94,6 +98,8 @@ export default class DropboxBackups extends Plugin {
                 await this.backup();
             }, 60000 * 5)
         );
+
+        await this.backup();
     }
 
     onunload() {
