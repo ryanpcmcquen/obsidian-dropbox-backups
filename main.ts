@@ -1,29 +1,66 @@
-import { App, Modal, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { Plugin } from "obsidian";
 import { Dropbox, DropboxAuth } from "dropbox";
 
-// interface MyPluginSettings {
-//  mySetting: string;
-// }
-
-// const DEFAULT_SETTINGS: MyPluginSettings = {
-//  mySetting: "default",
-// };
-
 export default class DropboxBackups extends Plugin {
-    // settings: MyPluginSettings;
     dbx: Dropbox;
     dbxAuth: DropboxAuth;
     clientId = "40ig42vaqj3762d";
 
+    allFiles: { path: string; contents: string }[];
+
+    async backup() {
+        if (this.allFiles && this.allFiles.length > 0) {
+            const now = Date.now();
+            // Add 1 because no one thinks of January as 0.
+            const month = new Date(now).getMonth() + 1;
+            const year = new Date(now).getFullYear();
+
+            console.log(`Backing up at ${now} ...`);
+
+            await Promise.all(
+                this.allFiles.map(async (file) => {
+                    return await this.dbx.filesUpload({
+                        path: `/${year}/${month}/${now}/${file.path}`,
+                        // @ts-ignore
+                        mode: "overwrite",
+                        mute: true,
+                        contents: file.contents,
+                    });
+                })
+            );
+        }
+    }
+
     async onload() {
         console.log("Loading Dropbox Backups plugin ...");
 
-        // await this.loadSettings();
+        this.registerObsidianProtocolHandler(
+            "dropbox-backups-auth",
+            async (params) => {
+                this.dbxAuth.setCodeVerifier(
+                    sessionStorage.getItem("codeVerifier") ||
+                        localStorage.getItem("codeVerifier")
+                );
+
+                const accessTokenResponse = await this.dbxAuth.getAccessTokenFromCode(
+                    "obsidian://dropbox-backups-auth",
+                    params.code
+                );
+
+                this.dbxAuth.setAccessToken(
+                    // @ts-ignore
+                    accessTokenResponse.result.access_token
+                );
+
+                this.dbx = new Dropbox({
+                    auth: this.dbxAuth,
+                });
+            }
+        );
 
         this.addRibbonIcon("dice", "Backup to Dropbox", async () => {
             const vaultPath = this.app.vault.getName();
-            const start = performance.now();
-            const allFiles = await Promise.all(
+            this.allFiles = await Promise.all(
                 this.app.vault.getFiles().map(async (tfile) => {
                     const fileContents = await this.app.vault.read(tfile);
                     return {
@@ -32,89 +69,34 @@ export default class DropboxBackups extends Plugin {
                     };
                 })
             );
-            console.log(allFiles);
-            console.log(performance.now() - start);
-            // @ts-ignore
-
-            // this.dbx = new Dropbox({ clientId: this.clientId });
-            // console.log(this.dbx);
 
             this.dbxAuth = new DropboxAuth();
             this.dbxAuth.setClientId(this.clientId);
             const authUrl = await this.dbxAuth.getAuthenticationUrl(
-                "app://obsidian.md/index.html"
+                "obsidian://dropbox-backups-auth",
+                undefined,
+                "code",
+                "offline",
+                undefined,
+                undefined,
+                true
             );
-            console.log(authUrl);
+            // @ts-ignore
+            sessionStorage.setItem("codeVerifier", this.dbxAuth.codeVerifier);
+            // @ts-ignore
+            localStorage.setItem("codeVerifier", this.dbxAuth.codeVerifier);
+
             window.location.assign(String(authUrl));
-            // const response = await this.dbx.filesListFolder({ path: "" });
-            // console.log(response);
         });
 
-        // this.addSettingTab(new SampleSettingTab(this.app, this));
-
-        // this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+        this.registerInterval(
+            window.setInterval(async () => {
+                await this.backup();
+            }, 60000 * 5)
+        );
     }
 
     onunload() {
         console.log("Unloading Dropbox Backups plugin ...");
     }
-
-    // async loadSettings() {
-    //  this.settings = Object.assign(
-    //      {},
-    //      DEFAULT_SETTINGS,
-    //      await this.loadData()
-    //  );
-    // }
-
-    // async saveSettings() {
-    //  await this.saveData(this.settings);
-    // }
 }
-
-// class SampleModal extends Modal {
-//  constructor(app: App) {
-//      super(app);
-//  }
-
-//  onOpen() {
-//      let { contentEl } = this;
-//      contentEl.setText("Woah!");
-//  }
-
-//  onClose() {
-//      let { contentEl } = this;
-//      contentEl.empty();
-//  }
-// }
-
-// class SampleSettingTab extends PluginSettingTab {
-//     plugin: MyPlugin;
-
-//     constructor(app: App, plugin: MyPlugin) {
-//         super(app, plugin);
-//         this.plugin = plugin;
-//     }
-
-//     display(): void {
-//         let { containerEl } = this;
-
-//         containerEl.empty();
-
-//         containerEl.createEl("h2", { text: "Settings for my awesome plugin." });
-
-//         new Setting(containerEl)
-//             .setName("Setting #1")
-//             .setDesc("It's a secret")
-//             .addText((text) =>
-//                 text
-//                     .setPlaceholder("Enter your secret")
-//                     .setValue("")
-//                     .onChange(async (value) => {
-//                         console.log("Secret: " + value);
-//                         this.plugin.settings.mySetting = value;
-//                         await this.plugin.saveSettings();
-//                     })
-//             );
-//     }
-// }
