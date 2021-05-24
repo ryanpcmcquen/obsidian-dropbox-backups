@@ -1,6 +1,5 @@
 import { Plugin } from "obsidian";
 import { Dropbox, DropboxAuth } from "dropbox";
-const sleep = require("util").promisify(setTimeout);
 import Bluebird from "bluebird";
 
 type file = { path: string; contents: string };
@@ -25,12 +24,6 @@ export default class DropboxBackups extends Plugin {
         );
     }
 
-    async makeEmWait() {
-        return new Promise((resolve) => {
-            return setTimeout(resolve, 1000);
-        });
-    }
-
     async backup() {
         await this.getAllFiles();
         if (this.allFiles && this.allFiles.length > 0) {
@@ -44,22 +37,13 @@ export default class DropboxBackups extends Plugin {
             await Bluebird.map(
                 this.allFiles,
                 async (file: file) => {
-                    let upload;
-                    // await this.makeEmWait();
-                    // await new Promise((resolve) =>
-                    // setTimeout(async () => {
-                    upload = await this.dbx.filesUpload({
+                    return await this.dbx.filesUpload({
                         path: `/${year}/${month}/${now}/${file.path}`,
                         // @ts-ignore
                         mode: "overwrite",
                         mute: true,
                         contents: file.contents,
                     });
-                    console.log(upload);
-                    // resolve(upload);
-                    // }, 1000)
-                    // );
-                    return upload;
                 },
                 { concurrency: 1 }
             );
