@@ -1,6 +1,6 @@
 ## Obsidian Dropbox Backups
 
-Automated backups to Dropbox of your entire vault every 15 minutes.
+Automated backups to Dropbox of your entire vault every 10 minutes.
 
 Backups are stored here:
 

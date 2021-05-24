@@ -24,7 +24,7 @@ export default class DropboxBackups extends Plugin {
         );
     }
 
-    async backup() {
+    async backup(): Promise<void> {
         await this.getAllFiles();
         if (this.allFiles && this.allFiles.length > 0) {
             const now = Date.now();
@@ -50,7 +50,7 @@ export default class DropboxBackups extends Plugin {
         }
     }
 
-    async onload() {
+    async onload(): Promise<void> {
         console.log("Loading Dropbox Backups plugin ...");
 
         this.registerObsidianProtocolHandler(
@@ -102,7 +102,7 @@ export default class DropboxBackups extends Plugin {
         this.registerInterval(
             window.setInterval(async () => {
                 await this.backup();
-            }, 60000 * 15)
+            }, 60000 * 10)
         );
 
         await this.backup();
