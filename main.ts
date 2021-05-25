@@ -9,7 +9,7 @@ export default class DropboxBackups extends Plugin {
     dbxAuth: DropboxAuth;
     clientId = "40ig42vaqj3762d";
 
-    accessTokenResponse: unknown = JSON.parse(
+    storedAccessTokenResponse: unknown = JSON.parse(
         localStorage.getItem("dropboxAccessTokenResponse")
     );
 
@@ -121,9 +121,9 @@ export default class DropboxBackups extends Plugin {
             this.dbxAuth = new DropboxAuth({
                 clientId: this.clientId,
                 // @ts-ignore
-                accessToken: this.accessTokenResponse.access_token,
+                accessToken: this.storedAccessTokenResponse.access_token,
                 // @ts-ignore
-                refreshToken: this.accessTokenResponse.refresh_token,
+                refreshToken: this.storedAccessTokenResponse.refresh_token,
             });
         }
 
@@ -147,7 +147,7 @@ export default class DropboxBackups extends Plugin {
             }
         );
 
-        if (this.accessTokenResponse) {
+        if (this.storedAccessTokenResponse) {
             await this.doStoredAuth();
         } else {
             await this.setupAuth();
