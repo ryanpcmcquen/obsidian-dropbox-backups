@@ -16,4 +16,4 @@ Underneath that folder, backups get stored as:
 
 ### Manually installing the plugin
 
--   Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/obsidian-dropbox-backups/`.
+-   Copy over `main.js`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/obsidian-dropbox-backups/`.
