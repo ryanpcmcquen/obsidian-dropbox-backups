@@ -1,7 +1,7 @@
 import { App, Modal, Plugin } from "obsidian";
 import { Dropbox, DropboxAuth } from "dropbox";
 import Bluebird from "bluebird";
-// import { BrowserWindow } from "electron";
+import remote, { BrowserWindow } from "@electron/remote";
 
 type file = { path: string; contents: string };
 
@@ -125,7 +125,7 @@ export default class DropboxBackups extends Plugin {
         if (authUrl) {
             // const { BrowserWindow, ipcMain } = remote;
             // @ts-ignore
-            new DropboxModal(this.app, authUrl).open();
+            new DropboxModal(authUrl).open();
             // this.app.vault.adapter.shell.openExternal(authUrl);
             // const browserWindow = new BrowserWindow({
             //     width: 1000,
@@ -176,89 +176,96 @@ export default class DropboxBackups extends Plugin {
     }
 }
 
-const createIframeContainerEl = (
-    contentEl: HTMLElement,
-    url: string
-): HTMLElement => {
-    const iframeContainer = contentEl.createEl("div");
-    iframeContainer.style.setProperty("--width", "100%");
-    iframeContainer.style.position = "relative";
-    iframeContainer.style.width = "100%";
-    // iframeContainer.style.paddingBottom = defaultHeightValue;
-    // Overflow cannot be set to "visible" (default) when using resize
-    iframeContainer.style.overflow = "auto";
-    iframeContainer.style.resize = "vertical";
+// const createIframeContainerEl = (
+//     contentEl: HTMLElement,
+//     url: string
+// ): HTMLElement => {
+//     const iframeContainer = contentEl.createEl("div");
+//     iframeContainer.style.setProperty("--width", "100%");
+//     iframeContainer.style.position = "relative";
+//     iframeContainer.style.width = "100%";
+//     // iframeContainer.style.paddingBottom = defaultHeightValue;
+//     // Overflow cannot be set to "visible" (default) when using resize
+//     iframeContainer.style.overflow = "auto";
+//     iframeContainer.style.resize = "vertical";
 
-    const iframe = iframeContainer.createEl("iframe");
-    iframe.src = url;
-    iframe.style.position = "absolute";
-    iframe.style.height = "100%";
-    iframe.style.width = "100%";
+//     const iframe = iframeContainer.createEl("iframe");
+//     iframe.src = url;
+//     iframe.style.position = "absolute";
+//     iframe.style.height = "100%";
+//     iframe.style.width = "100%";
 
-    return iframeContainer;
-};
+//     return iframeContainer;
+// };
 
-class DropboxModal extends Modal {
-    url: string;
-    sucess: boolean;
-    generatedIframe: string;
-    editor: any;
+// const decodeRequestBody = (body: unknown): ParsedQuery<string> => {
+//   const requestDetails = body as OnBeforeRequestListenerDetails;
+//   const formDataRaw = requestDetails.uploadData;
+//   const formDataBuffer = Array.from(formDataRaw)[0].bytes;
 
-    constructor(app: App, url: string, editor: any) {
-        super(app);
-        this.url = url;
-        this.editor = editor;
+//   const decoder = new StringDecoder();
+//   const formData = decoder.write(formDataBuffer);
+//   return queryString.parse(formData);
+// };
+
+class DropboxModal {
+    private modal: BrowserWindow;
+    private waitForSignIn: Promise<boolean>;
+    private resolvePromise!: (success: boolean) => void;
+    authUrl: string;
+
+    constructor(authUrl: string) {
+        // super(app);
+        this.authUrl = authUrl;
+        this.waitForSignIn = new Promise(
+            (resolve: (success: boolean) => void) =>
+                (this.resolvePromise = resolve)
+        );
+
+        this.modal = new BrowserWindow({
+            parent: remote.getCurrentWindow(),
+            width: 450,
+            height: 730,
+            show: false,
+        });
+
+        // We can only change title after page is loaded since HTML page has its own title
+        this.modal.once("ready-to-show", () => {
+            this.modal.setTitle("Connect your Dropbox account to Obsidian");
+            this.modal.show();
+        });
+
+        // Intercept login to amazon to sniff out user email address to store in plugin state for display purposes
+        this.modal.webContents.session.webRequest.onBeforeSendHeaders(
+            { urls: ["https://www.dropbox.com/login"] },
+            (details, callback) => {
+                // const formData = decodeRequestBody(details);
+                // userEmail = formData.email as string;
+
+                callback(details);
+            }
+        );
+
+        this.modal.on("closed", () => {
+            this.resolvePromise(false);
+        });
+
+        // If user is on the read.amazon.com url, we can safely assume they are logged in
+        // this.modal.webContents.on('did-navigate', async (_event, url) => {
+        // if (url.startsWith('https://read.amazon.com')) {
+        // this.modal.close();
+
+        // if (!get(settingsStore).loggedInEmail) {
+        // await settingsStore.actions.login(userEmail);
+        // }
+
+        // this.resolvePromise(true);
+        // }
+        // });
     }
 
-    onOpen() {
-        let { contentEl } = this;
-
-        const container = contentEl.createEl("div");
-        container.className = "iframe__container";
-
-        // const title = contentEl.createEl("h2");
-        // title.innerText =
-        // "This is how the iframe is going to look (your can choose the size)";
-
-        const iframeContainer = createIframeContainerEl(contentEl, this.url);
-        // const widthCheckbox = createShouldUseDefaultWidthCheckbox(
-        //     iframeContainer
-        // );
-        // const heightInput = createHeightInput(iframeContainer);
-
-        const okButton = contentEl.createEl("button");
-        okButton.setText("OK");
-        okButton.className = "mod-warning";
-        okButton.onclick = (e) => {
-            e.preventDefault();
-
-            const generatedIframe = iframeContainer.outerHTML;
-            this.editor.replaceSelection(generatedIframe);
-            this.close();
-        };
-
-        const cancelButton = contentEl.createEl("button");
-        cancelButton.setText("Cancel");
-        cancelButton.onclick = (e) => {
-            e.preventDefault();
-            this.close();
-        };
-
-        const buttonContainer = contentEl.createEl("div");
-        buttonContainer.className = "button__container";
-        // buttonContainer.appendChild(okButton);
-        // buttonContainer.appendChild(cancelButton);
-
-        // container.appendChild(title);
-        // container.appendChild(widthCheckbox);
-        // container.appendChild(heightInput);
-        container.appendChild(iframeContainer);
-        container.appendChild(buttonContainer);
-        contentEl.appendChild(container);
-    }
-
-    onClose() {
-        let { contentEl } = this;
-        contentEl.empty();
+    async doLogin(): Promise<boolean> {
+        this.modal.loadURL(this.authUrl);
+        return this.waitForSignIn;
     }
 }
