@@ -56,16 +56,18 @@ export default class DropboxBackups extends Plugin {
             console.log(`Backup to ${pathPrefix} complete!`);
             this.lastBackup = new Date(now);
             // @ts-ignore
-            this.app.workspace.leftRibbon.ribbonActionsEl.querySelector(
+            const dropboxBackupsRibbonIcon = this.app.workspace.leftRibbon.ribbonActionsEl.querySelector(
                 "[aria-label^='Backup to Dropbox']"
-            ).ariaLabel =
-                "Backup to Dropbox\n" + `Last backup: ${this.lastBackup}`;
+            );
+            if (dropboxBackupsRibbonIcon) {
+                dropboxBackupsRibbonIcon.ariaLabel =
+                    "Backup to Dropbox\n" + `Last backup: ${this.lastBackup}`;
+            }
         }
     }
 
     async setupAuth() {
-        this.dbxAuth = new DropboxAuth();
-        this.dbxAuth.setClientId(this.clientId);
+        this.dbxAuth = new DropboxAuth({ clientId: this.clientId });
 
         const authUrl = String(
             await this.dbxAuth.getAuthenticationUrl(
@@ -114,13 +116,24 @@ export default class DropboxBackups extends Plugin {
         await this.backup();
     }
 
-    async doStoredAuth() {
+    async doStoredAuth(): Promise<void> {
+        if (!this.dbxAuth) {
+            this.dbxAuth = new DropboxAuth({
+                clientId: this.clientId,
+                // @ts-ignore
+                accessToken: this.accessTokenResponse.access_token,
+                // @ts-ignore
+                refreshToken: this.accessTokenResponse.refresh_token,
+            });
+        }
+
+        // @ts-ignore
+        await this.dbxAuth.checkAndRefreshAccessToken();
+
         this.dbx = new Dropbox({
-            // @ts-ignore
-            accessToken: this.accessTokenResponse.access_token,
-            // @ts-ignore
-            refreshToken: this.accessTokenResponse.refresh_token,
+            auth: this.dbxAuth,
         });
+
         await this.backup();
     }
 

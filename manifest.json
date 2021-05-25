@@ -1,10 +1,10 @@
 {
-	"id": "obsidian-dropbox-backups",
-	"name": "Dropbox Backups",
-	"version": "0.1.0",
-	"minAppVersion": "0.9.12",
-	"description": "Automated backups to Dropbox for your enjoyment.",
-	"author": "ryanpcmcquen",
-	"authorUrl": "https://github.com/ryanpcmcquen",
-	"isDesktopOnly": false
+    "id": "obsidian-dropbox-backups",
+    "name": "Dropbox Backups",
+    "version": "0.1.1",
+    "minAppVersion": "0.9.12",
+    "description": "Automated backups to Dropbox for your enjoyment.",
+    "author": "ryanpcmcquen",
+    "authorUrl": "https://github.com/ryanpcmcquen",
+    "isDesktopOnly": false
 }
