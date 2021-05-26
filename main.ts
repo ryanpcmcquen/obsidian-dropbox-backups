@@ -35,12 +35,13 @@ export default class DropboxBackups extends Plugin {
         if (this.allFiles && this.allFiles.length > 0) {
             const now = Date.now();
 
-            const year = new Date(now).getFullYear();
+            const year = moment(new Date(now)).format("YYYY");
             // Add 1 because no one thinks of January as 0.
-            const month = new Date(now).getMonth() + 1;
-            const day = new Date(now).getDate();
+            const month = moment(new Date(now)).format("MM");
+            const day = moment(new Date(now)).format("DD");
+            const time = moment(new Date(now)).format("HH_mm_SSSS");
 
-            const pathPrefix = `/${year}/${month}/${day}/${now}`;
+            const pathPrefix = `/${year}/${month}/${day}/${time}`;
             console.log(`Backing up to: ${pathPrefix}`);
 
             await Bluebird.map(
