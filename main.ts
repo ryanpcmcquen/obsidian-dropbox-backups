@@ -1,19 +1,20 @@
 import { Plugin } from "obsidian";
 import { Dropbox, DropboxAuth } from "dropbox";
 import Bluebird from "bluebird";
+import moment from "moment";
 
 type file = { path: string; contents: string };
 
 export default class DropboxBackups extends Plugin {
     dbx: Dropbox;
     dbxAuth: DropboxAuth;
-    clientId = "40ig42vaqj3762d";
+    CLIENT_ID = "40ig42vaqj3762d";
 
     storedAccessTokenResponse: unknown = JSON.parse(
         localStorage.getItem("dropboxAccessTokenResponse")
     );
 
-    lastBackup: Date;
+    lastBackup: string;
 
     allFiles: file[];
 
@@ -34,10 +35,13 @@ export default class DropboxBackups extends Plugin {
         await this.getAllFiles();
         if (this.allFiles && this.allFiles.length > 0) {
             const now = Date.now();
+
+            const year = new Date(now).getFullYear();
             // Add 1 because no one thinks of January as 0.
             const month = new Date(now).getMonth() + 1;
-            const year = new Date(now).getFullYear();
-            const pathPrefix = `/${year}/${month}/${now}`;
+            const day = new Date(now).getDate();
+
+            const pathPrefix = `/${year}/${month}/${day}/${now}`;
             console.log(`Backing up to: ${pathPrefix}`);
 
             await Bluebird.map(
@@ -53,12 +57,17 @@ export default class DropboxBackups extends Plugin {
                 },
                 { concurrency: 1 }
             );
+
             console.log(`Backup to ${pathPrefix} complete!`);
-            this.lastBackup = new Date(now);
+            this.lastBackup = moment(new Date(now)).format(
+                "YYYY.MM.DD, HH:mm:ss"
+            );
+
             // @ts-ignore
             const dropboxBackupsRibbonIcon = this.app.workspace.leftRibbon.ribbonActionsEl.querySelector(
                 "[aria-label^='Backup to Dropbox']"
             );
+
             if (dropboxBackupsRibbonIcon) {
                 dropboxBackupsRibbonIcon.ariaLabel =
                     "Backup to Dropbox\n" + `Last backup: ${this.lastBackup}`;
@@ -67,7 +76,7 @@ export default class DropboxBackups extends Plugin {
     }
 
     async setupAuth() {
-        this.dbxAuth = new DropboxAuth({ clientId: this.clientId });
+        this.dbxAuth = new DropboxAuth({ clientId: this.CLIENT_ID });
 
         const authUrl = String(
             await this.dbxAuth.getAuthenticationUrl(
@@ -119,7 +128,7 @@ export default class DropboxBackups extends Plugin {
     async doStoredAuth(): Promise<void> {
         if (!this.dbxAuth) {
             this.dbxAuth = new DropboxAuth({
-                clientId: this.clientId,
+                clientId: this.CLIENT_ID,
                 // @ts-ignore
                 accessToken: this.storedAccessTokenResponse.access_token,
                 // @ts-ignore
@@ -137,6 +146,18 @@ export default class DropboxBackups extends Plugin {
         await this.backup();
     }
 
+    async attemptBackup() {
+        try {
+            await this.backup();
+        } catch (ignore) {
+            if (this.storedAccessTokenResponse) {
+                await this.doStoredAuth();
+            } else {
+                await this.setupAuth();
+            }
+        }
+    }
+
     async onload(): Promise<void> {
         console.log("Loading Dropbox Backups plugin ...");
 
@@ -147,31 +168,25 @@ export default class DropboxBackups extends Plugin {
             }
         );
 
+        this.addRibbonIcon("popup-open", "Backup to Dropbox", async () => {
+            await this.attemptBackup();
+        });
+
         if (this.storedAccessTokenResponse) {
             await this.doStoredAuth();
         } else {
             await this.setupAuth();
         }
 
-        this.addRibbonIcon("popup-open", "Backup to Dropbox", async () => {
-            try {
-                await this.backup();
-            } catch (ignore) {
-                await this.setupAuth();
-            }
-        });
-
         this.registerInterval(
             window.setInterval(
                 async () => {
-                    await this.backup();
+                    await this.attemptBackup();
                 },
                 // Every 10 minutes:
                 60000 * 10
             )
         );
-
-        await this.backup();
     }
 
     onunload() {

@@ -13,7 +13,7 @@ Backups are stored here:
 Underneath that folder, backups get stored as:
 
 ```
-/YEAR/MONTH/UNIX_EPOCH/VAULT_NAME
+/YEAR/MONTH/DAY/UNIX_EPOCH/VAULT_NAME
 ```
 
 ### Manually installing the plugin
