@@ -16,6 +16,8 @@ Underneath that folder, backups get stored as:
 /YEAR/MONTH/DAY/UNIX_EPOCH/VAULT_NAME
 ```
 
+<img width="312" alt="Screen Shot 2021-05-26 at 7 50 56 AM" src="https://user-images.githubusercontent.com/772937/119681930-55dc3a00-bdf7-11eb-9389-800bbf1f6d0f.png">
+
 ### Manually installing the plugin
 
 -   Copy over `main.js`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/obsidian-dropbox-backups/`.
