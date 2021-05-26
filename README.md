@@ -20,7 +20,7 @@ Underneath that folder, backups get stored as:
 
 ### Usage
 
-Click the icon to authenticate with Dropbox. After that, backups will happen every 10 minutes. You can also fire off a backup by clicking the ribbon icon.
+Click the icon to authenticate with Dropbox. After that, backups will happen every 10 minutes. You can also fire off a backup at any time by clicking the ribbon icon.
 
 ### Manually installing the plugin
 
