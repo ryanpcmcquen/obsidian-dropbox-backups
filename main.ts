@@ -1,7 +1,6 @@
-import { Plugin } from "obsidian";
+import { moment, Plugin } from "obsidian";
 import { Dropbox, DropboxAuth } from "dropbox";
 import Bluebird from "bluebird";
-import moment from "moment";
 
 type file = { path: string; contents: string };
 
@@ -78,6 +77,16 @@ export default class DropboxBackups extends Plugin {
     async setupAuth() {
         this.dbxAuth = new DropboxAuth({ clientId: this.CLIENT_ID });
 
+        // From the Dropbox docs:
+        // getAuthenticationUrl(
+        //     redirectUri,
+        //     state,
+        //     authType = 'token',
+        //     tokenAccessType = null,
+        //     scope = null,
+        //     includeGrantedScopes = 'none',
+        //     usePKCE = false
+        // )
         const authUrl = String(
             await this.dbxAuth.getAuthenticationUrl(
                 "obsidian://dropbox-backups-auth",
@@ -146,15 +155,19 @@ export default class DropboxBackups extends Plugin {
         await this.backup();
     }
 
+    async attemptAuth() {
+        if (this.storedAccessTokenResponse) {
+            await this.doStoredAuth();
+        } else {
+            await this.setupAuth();
+        }
+    }
+
     async attemptBackup() {
         try {
             await this.backup();
         } catch (ignore) {
-            if (this.storedAccessTokenResponse) {
-                await this.doStoredAuth();
-            } else {
-                await this.setupAuth();
-            }
+            await this.attemptAuth();
         }
     }
 
@@ -172,11 +185,7 @@ export default class DropboxBackups extends Plugin {
             await this.attemptBackup();
         });
 
-        if (this.storedAccessTokenResponse) {
-            await this.doStoredAuth();
-        } else {
-            await this.setupAuth();
-        }
+        await this.attemptAuth();
 
         this.registerInterval(
             window.setInterval(
