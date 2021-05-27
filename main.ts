@@ -36,7 +36,6 @@ export default class DropboxBackups extends Plugin {
             const now = Date.now();
 
             const year = moment(new Date(now)).format("YYYY");
-            // Add 1 because no one thinks of January as 0.
             const month = moment(new Date(now)).format("MM");
             const day = moment(new Date(now)).format("DD");
             const time = moment(new Date(now)).format("HH_mm_SSSS");
