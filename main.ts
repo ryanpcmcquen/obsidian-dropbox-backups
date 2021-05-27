@@ -103,7 +103,7 @@ export default class DropboxBackups extends Plugin {
         // @ts-ignore
         localStorage.setItem("codeVerifier", this.dbxAuth.codeVerifier);
 
-        window.location.assign(authUrl);
+        window.open(authUrl);
     }
 
     async doAuth(params: any) {
