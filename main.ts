@@ -1,5 +1,5 @@
 import { moment, Plugin } from "obsidian";
-import { Dropbox, DropboxAuth } from "dropbox";
+import { Dropbox, DropboxAuth, files } from "dropbox";
 import Bluebird from "bluebird";
 
 type file = { path: string; contents: string };
@@ -48,8 +48,7 @@ export default class DropboxBackups extends Plugin {
                 async (file: file) => {
                     return await this.dbx.filesUpload({
                         path: `${pathPrefix}/${file.path}`,
-                        // @ts-ignore
-                        mode: "overwrite",
+                        mode: ("overwrite" as unknown) as files.WriteMode,
                         mute: true,
                         contents: file.contents,
                     });
