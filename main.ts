@@ -38,7 +38,7 @@ export default class DropboxBackups extends Plugin {
             const year = moment(new Date(now)).format("YYYY");
             const month = moment(new Date(now)).format("MM");
             const day = moment(new Date(now)).format("DD");
-            const time = moment(new Date(now)).format("HH_mm_SSSS");
+            const time = moment(new Date(now)).format("HH_mm_ss_SSS");
 
             const pathPrefix = `/${year}/${month}/${day}/${time}`;
             console.log(`Backing up to: ${pathPrefix}`);
