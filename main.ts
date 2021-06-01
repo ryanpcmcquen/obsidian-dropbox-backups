@@ -7,7 +7,11 @@ type file = { path: string; contents: string };
 export default class DropboxBackups extends Plugin {
     dbx: Dropbox;
     dbxAuth: DropboxAuth;
+
     CLIENT_ID = "40ig42vaqj3762d";
+    obsidianProtocol = "obsidian://";
+    obsidianProtocolAction = "dropbox-backups-auth";
+    obsidianProtocolActionUrl = `${this.obsidianProtocol}${this.obsidianProtocolAction}`;
 
     storedAccessTokenResponse: unknown = JSON.parse(
         localStorage.getItem("dropboxAccessTokenResponse")
@@ -88,7 +92,7 @@ export default class DropboxBackups extends Plugin {
         // )
         const authUrl = String(
             await this.dbxAuth.getAuthenticationUrl(
-                "obsidian://dropbox-backups-auth",
+                this.obsidianProtocolActionUrl,
                 undefined,
                 "code",
                 "offline",
@@ -112,7 +116,7 @@ export default class DropboxBackups extends Plugin {
         );
 
         const accessTokenResponse = await this.dbxAuth.getAccessTokenFromCode(
-            "obsidian://dropbox-backups-auth",
+            this.obsidianProtocolActionUrl,
             params.code
         );
 
@@ -174,7 +178,7 @@ export default class DropboxBackups extends Plugin {
         console.log("Loading Dropbox Backups plugin ...");
 
         this.registerObsidianProtocolHandler(
-            "dropbox-backups-auth",
+            this.obsidianProtocolAction,
             async (params) => {
                 await this.doAuth(params);
             }
