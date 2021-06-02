@@ -12,12 +12,11 @@ export default class DropboxBackups extends Plugin {
     obsidianProtocol = "obsidian://";
     obsidianProtocolAction = "dropbox-backups-auth";
     obsidianProtocolActionUrl = `${this.obsidianProtocol}${this.obsidianProtocolAction}`;
+    defaultAriaLabel = "Backup to Dropbox";
 
     storedAccessTokenResponse: unknown = JSON.parse(
         localStorage.getItem("dropboxAccessTokenResponse")
     );
-
-    lastBackup: string;
 
     allFiles: file[];
 
@@ -46,7 +45,18 @@ export default class DropboxBackups extends Plugin {
             const time = moment(new Date(now)).format("HH_mm_ss_SSS");
 
             const pathPrefix = `/${this.vaultPath}/${year}/${month}/${day}/${time}`;
-            console.log(`Backing up to: ${pathPrefix}`);
+
+            // @ts-ignore
+            const dropboxBackupsRibbonIcon = this.app.workspace.leftRibbon.ribbonActionsEl.querySelector(
+                `[aria-label^='${this.defaultAriaLabel}']`
+            );
+
+            const backupAttemptLogMessage = `Attempting backup to: ${pathPrefix}`;
+            console.log(backupAttemptLogMessage);
+            if (dropboxBackupsRibbonIcon) {
+                dropboxBackupsRibbonIcon.ariaLabel =
+                    this.defaultAriaLabel + "\n" + backupAttemptLogMessage;
+            }
 
             await Bluebird.map(
                 this.allFiles,
@@ -62,18 +72,10 @@ export default class DropboxBackups extends Plugin {
             );
 
             console.log(`Backup to ${pathPrefix} complete!`);
-            this.lastBackup = moment(new Date(now)).format(
-                "YYYY.MM.DD, HH:mm:ss"
-            );
-
-            // @ts-ignore
-            const dropboxBackupsRibbonIcon = this.app.workspace.leftRibbon.ribbonActionsEl.querySelector(
-                "[aria-label^='Backup to Dropbox']"
-            );
 
             if (dropboxBackupsRibbonIcon) {
                 dropboxBackupsRibbonIcon.ariaLabel =
-                    "Backup to Dropbox\n" + `Last backup: ${this.lastBackup}`;
+                    this.defaultAriaLabel + "\n" + `Last backup: ${pathPrefix}`;
             }
         }
     }
@@ -185,7 +187,7 @@ export default class DropboxBackups extends Plugin {
             }
         );
 
-        this.addRibbonIcon("popup-open", "Backup to Dropbox", async () => {
+        this.addRibbonIcon("popup-open", this.defaultAriaLabel, async () => {
             await this.attemptBackup();
         });
 
