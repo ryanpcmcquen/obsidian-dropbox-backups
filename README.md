@@ -18,7 +18,8 @@ Underneath that folder, backups get stored as:
 
 We use fractional seconds to prevent collisions with ad hoc backups.
 
-<img width="312" alt="Screen Shot 2021-05-26 at 7 50 56 AM" src="https://user-images.githubusercontent.com/772937/119681930-55dc3a00-bdf7-11eb-9389-800bbf1f6d0f.png">
+<img width="355" alt="Screen Shot 2021-06-02 at 10 44 08 AM" src="https://user-images.githubusercontent.com/772937/120528074-e387ce80-c38f-11eb-97ac-72a4007fa8d7.png">
+<img width="365" alt="Screen Shot 2021-06-02 at 10 44 15 AM" src="https://user-images.githubusercontent.com/772937/120528075-e4b8fb80-c38f-11eb-9be9-8b335e2ab84a.png">
 
 ### Usage
 
