@@ -13,7 +13,7 @@ Backups are stored here:
 Underneath that folder, backups get stored as:
 
 ```
-/YEAR/MONTH/DAY/TIME_WITH_FRACTIONAL_SECONDS/VAULT_NAME
+/VAULT_NAME/YEAR/MONTH/DAY/TIME_WITH_FRACTIONAL_SECONDS/VAULT_CONTENTS
 ```
 
 We use fractional seconds to prevent collisions with ad hoc backups.

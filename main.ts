@@ -21,13 +21,14 @@ export default class DropboxBackups extends Plugin {
 
     allFiles: file[];
 
+    vaultPath = this.app.vault.getName();
+
     async getAllFiles() {
-        const vaultPath = this.app.vault.getName();
         this.allFiles = await Promise.all(
             this.app.vault.getFiles().map(async (tfile) => {
                 const fileContents = await this.app.vault.read(tfile);
                 return {
-                    path: `${vaultPath}/${tfile.path}`,
+                    path: tfile.path,
                     contents: fileContents,
                 };
             })
@@ -44,7 +45,7 @@ export default class DropboxBackups extends Plugin {
             const day = moment(new Date(now)).format("DD");
             const time = moment(new Date(now)).format("HH_mm_ss_SSS");
 
-            const pathPrefix = `/${year}/${month}/${day}/${time}`;
+            const pathPrefix = `/${this.vaultPath}/${year}/${month}/${day}/${time}`;
             console.log(`Backing up to: ${pathPrefix}`);
 
             await Bluebird.map(
