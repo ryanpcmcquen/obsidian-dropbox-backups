@@ -34,6 +34,16 @@ This app requires the following Dropbox permissions:
 -   `files.metadata.read`: You can't turn this one off either. I never read or list files, so it shouldn't be necessary, but Dropbox doesn't allow turning it off.
 -   `files.content.write`: This is the one I actually need. This app only writes files. This app cannot read files. It is also scoped to only its folder.
 
+### Known limitations
+
+Any files not in this list:
+
+-   `md`
+-   `org`
+-   `txt`
+
+Are _assumed_ to be binary files, and read/uploaded as such. Please let me know if more files need to be added to this list that are actually plain text.
+
 ### Manually installing the plugin
 
 -   Copy over `main.js`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/obsidian-dropbox-backups/`.
