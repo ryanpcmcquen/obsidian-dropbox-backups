@@ -37,16 +37,14 @@ export default class DropboxBackups extends Plugin {
                 this.defaultAriaLabel + "\n" + backupAttemptLogMessage;
         }
 
-        // @ts-ignore
-        for (let file of this.app.vault.getFiles()) {
+        for (const file of this.app.vault.getFiles()) {
             // @ts-ignore
             if (this.app.vault.exists(file.path)) {
                 await this.dbx.filesUpload({
                     path: `${pathPrefix}/${file.path}`,
                     mode: ("overwrite" as unknown) as files.WriteMode,
                     mute: true,
-                    // @ts-ignore
-                    contents: file.contents,
+                    contents: await this.app.vault.read(file),
                 });
             }
         }
