@@ -23,11 +23,4 @@ export default {
     },
     external: ["obsidian"],
     plugins: [typescript(), nodeResolve({ browser: true }), commonjs(), json()],
-    onwarn(warning, warn) {
-        // Need this for Bluebird:
-        if (warning.code === "EVAL") {
-            return;
-        }
-        warn(warning);
-    },
 };
