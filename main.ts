@@ -1,8 +1,5 @@
 import { moment, Plugin } from "obsidian";
 import { Dropbox, DropboxAuth, files } from "dropbox";
-import Bluebird from "bluebird";
-
-type file = { path: string; contents: string };
 
 export default class DropboxBackups extends Plugin {
     dbx: Dropbox;
@@ -14,69 +11,52 @@ export default class DropboxBackups extends Plugin {
     obsidianProtocolActionUrl = `${this.obsidianProtocol}${this.obsidianProtocolAction}`;
     defaultAriaLabel = "Backup to Dropbox";
 
+    dropboxBackupsRibbonIcon: HTMLElement;
+
     storedAccessTokenResponse: unknown = JSON.parse(
         localStorage.getItem("dropboxAccessTokenResponse")
     );
 
-    allFiles: file[];
-
     vaultPath = this.app.vault.getName();
 
-    async getAllFiles() {
-        this.allFiles = await Promise.all(
-            this.app.vault.getFiles().map(async (tfile) => {
-                const fileContents = await this.app.vault.read(tfile);
-                return {
-                    path: tfile.path,
-                    contents: fileContents,
-                };
-            })
-        );
-    }
-
     async backup(): Promise<void> {
-        await this.getAllFiles();
-        if (this.allFiles && this.allFiles.length > 0) {
-            const now = Date.now();
+        const now = Date.now();
 
-            const year = moment(new Date(now)).format("YYYY");
-            const month = moment(new Date(now)).format("MM");
-            const day = moment(new Date(now)).format("DD");
-            const time = moment(new Date(now)).format("HH_mm_ss_SSS");
+        const year = moment(new Date(now)).format("YYYY");
+        const month = moment(new Date(now)).format("MM");
+        const day = moment(new Date(now)).format("DD");
+        const time = moment(new Date(now)).format("HH_mm_ss_SSS");
 
-            const pathPrefix = `/${this.vaultPath}/${year}/${month}/${day}/${time}`;
+        const pathPrefix = `/${this.vaultPath}/${year}/${month}/${day}/${time}`;
 
+        const backupAttemptLogMessage = `Attempting backup to: ${pathPrefix}`;
+        console.log(backupAttemptLogMessage);
+        if (this.dropboxBackupsRibbonIcon) {
             // @ts-ignore
-            const dropboxBackupsRibbonIcon = this.app.workspace.leftRibbon.ribbonActionsEl.querySelector(
-                `[aria-label^='${this.defaultAriaLabel}']`
-            );
+            this.dropboxBackupsRibbonIcon.ariaLabel =
+                this.defaultAriaLabel + "\n" + backupAttemptLogMessage;
+        }
 
-            const backupAttemptLogMessage = `Attempting backup to: ${pathPrefix}`;
-            console.log(backupAttemptLogMessage);
-            if (dropboxBackupsRibbonIcon) {
-                dropboxBackupsRibbonIcon.ariaLabel =
-                    this.defaultAriaLabel + "\n" + backupAttemptLogMessage;
+        // @ts-ignore
+        for (let file of this.app.vault.getFiles()) {
+            // @ts-ignore
+            if (this.app.vault.exists(file.path)) {
+                await this.dbx.filesUpload({
+                    path: `${pathPrefix}/${file.path}`,
+                    mode: ("overwrite" as unknown) as files.WriteMode,
+                    mute: true,
+                    // @ts-ignore
+                    contents: file.contents,
+                });
             }
+        }
 
-            await Bluebird.map(
-                this.allFiles,
-                async (file: file) => {
-                    return await this.dbx.filesUpload({
-                        path: `${pathPrefix}/${file.path}`,
-                        mode: ("overwrite" as unknown) as files.WriteMode,
-                        mute: true,
-                        contents: file.contents,
-                    });
-                },
-                { concurrency: 1 }
-            );
+        console.log(`Backup to ${pathPrefix} complete!`);
 
-            console.log(`Backup to ${pathPrefix} complete!`);
-
-            if (dropboxBackupsRibbonIcon) {
-                dropboxBackupsRibbonIcon.ariaLabel =
-                    this.defaultAriaLabel + "\n" + `Last backup: ${pathPrefix}`;
-            }
+        if (this.dropboxBackupsRibbonIcon) {
+            // @ts-ignore
+            this.dropboxBackupsRibbonIcon.ariaLabel =
+                this.defaultAriaLabel + "\n" + `Last backup: ${pathPrefix}`;
         }
     }
 
@@ -187,11 +167,15 @@ export default class DropboxBackups extends Plugin {
             }
         );
 
-        this.addRibbonIcon("popup-open", this.defaultAriaLabel, async () => {
-            await this.attemptBackup();
-        });
+        this.dropboxBackupsRibbonIcon = this.addRibbonIcon(
+            "popup-open",
+            this.defaultAriaLabel,
+            async () => {
+                await this.attemptBackup();
+            }
+        );
 
-        await this.attemptAuth();
+        this.attemptAuth();
 
         this.registerInterval(
             window.setInterval(
