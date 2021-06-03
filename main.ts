@@ -1,6 +1,11 @@
 import { moment, Plugin } from "obsidian";
 import { Dropbox, DropboxAuth, DropboxResponse, files } from "dropbox";
 
+type accessTokenResponseResultType = {
+    access_token: string;
+    refresh_token: string;
+};
+
 export default class DropboxBackups extends Plugin {
     dbx: Dropbox;
     dbxAuth: DropboxAuth;
@@ -13,10 +18,7 @@ export default class DropboxBackups extends Plugin {
 
     dropboxBackupsRibbonIcon: HTMLElement;
 
-    storedAccessTokenResponse: DropboxResponse<{
-        access_token: string;
-        refresh_token: string;
-    }>["result"] = JSON.parse(
+    storedAccessTokenResponse: DropboxResponse<accessTokenResponseResultType>["result"] = JSON.parse(
         localStorage.getItem("dropboxAccessTokenResponse")
     );
 
@@ -97,10 +99,9 @@ export default class DropboxBackups extends Plugin {
                 true
             )
         );
-        // @ts-ignore
-        sessionStorage.setItem("codeVerifier", this.dbxAuth.codeVerifier);
-        // @ts-ignore
-        localStorage.setItem("codeVerifier", this.dbxAuth.codeVerifier);
+
+        sessionStorage.setItem("codeVerifier", this.dbxAuth.getCodeVerifier());
+        localStorage.setItem("codeVerifier", this.dbxAuth.getCodeVerifier());
 
         window.open(authUrl);
     }
@@ -116,13 +117,14 @@ export default class DropboxBackups extends Plugin {
             params.code
         );
 
+        const accessTokenResponseResult = accessTokenResponse?.result as accessTokenResponseResultType;
+
         localStorage.setItem(
             "dropboxAccessTokenResponse",
-            JSON.stringify(accessTokenResponse?.result)
+            JSON.stringify(accessTokenResponseResult)
         );
 
-        // @ts-ignore
-        this.dbxAuth.setAccessToken(accessTokenResponse.result.access_token);
+        this.dbxAuth.setAccessToken(accessTokenResponseResult?.access_token);
 
         this.dbx = new Dropbox({
             auth: this.dbxAuth,
