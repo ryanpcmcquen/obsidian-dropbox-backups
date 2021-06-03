@@ -44,8 +44,7 @@ export default class DropboxBackups extends Plugin {
         const fileList = this.app.vault.getFiles();
         if (fileList.length > 0) {
             for (const file of fileList) {
-                // @ts-ignore
-                if (this.app.vault.exists(file.path)) {
+                if (this.app.vault.adapter.exists(file.path)) {
                     const fileContents = this.couldBeBinary(file.extension)
                         ? await this.app.vault.readBinary(file)
                         : await this.app.vault.read(file);
@@ -117,10 +116,8 @@ export default class DropboxBackups extends Plugin {
             JSON.stringify(accessTokenResponse?.result)
         );
 
-        this.dbxAuth.setAccessToken(
-            // @ts-ignore
-            accessTokenResponse.result.access_token
-        );
+        // @ts-ignore
+        this.dbxAuth.setAccessToken(accessTokenResponse.result.access_token);
 
         this.dbx = new Dropbox({
             auth: this.dbxAuth,
@@ -140,7 +137,6 @@ export default class DropboxBackups extends Plugin {
             });
         }
 
-        // @ts-ignore
         await this.dbxAuth.checkAndRefreshAccessToken();
 
         this.dbx = new Dropbox({
