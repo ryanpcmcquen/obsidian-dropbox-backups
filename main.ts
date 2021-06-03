@@ -19,6 +19,10 @@ export default class DropboxBackups extends Plugin {
 
     vaultPath = this.app.vault.getName();
 
+    couldBeBinary(extension: string) {
+        return extension !== "md" && extension !== "org" && extension !== "txt";
+    }
+
     async backup(): Promise<void> {
         const now = Date.now();
 
@@ -42,11 +46,15 @@ export default class DropboxBackups extends Plugin {
             for (const file of fileList) {
                 // @ts-ignore
                 if (this.app.vault.exists(file.path)) {
+                    const fileContents = this.couldBeBinary(file.extension)
+                        ? await this.app.vault.readBinary(file)
+                        : await this.app.vault.read(file);
+
                     await this.dbx.filesUpload({
                         path: `${pathPrefix}/${file.path}`,
                         mode: ("overwrite" as unknown) as files.WriteMode,
                         mute: true,
-                        contents: await this.app.vault.read(file),
+                        contents: fileContents,
                     });
                 }
             }
