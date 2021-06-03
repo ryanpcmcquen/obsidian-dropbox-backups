@@ -1,5 +1,5 @@
 import { moment, Plugin } from "obsidian";
-import { Dropbox, DropboxAuth, files } from "dropbox";
+import { Dropbox, DropboxAuth, DropboxResponse, files } from "dropbox";
 
 export default class DropboxBackups extends Plugin {
     dbx: Dropbox;
@@ -13,7 +13,10 @@ export default class DropboxBackups extends Plugin {
 
     dropboxBackupsRibbonIcon: HTMLElement;
 
-    storedAccessTokenResponse: unknown = JSON.parse(
+    storedAccessTokenResponse: DropboxResponse<{
+        access_token: string;
+        refresh_token: string;
+    }>["result"] = JSON.parse(
         localStorage.getItem("dropboxAccessTokenResponse")
     );
 
@@ -36,9 +39,10 @@ export default class DropboxBackups extends Plugin {
         const backupAttemptLogMessage = `Attempting backup to: ${pathPrefix}`;
         console.log(backupAttemptLogMessage);
         if (this.dropboxBackupsRibbonIcon) {
-            // @ts-ignore
-            this.dropboxBackupsRibbonIcon.ariaLabel =
-                this.defaultAriaLabel + "\n" + backupAttemptLogMessage;
+            this.dropboxBackupsRibbonIcon.setAttribute(
+                "aria-label",
+                this.defaultAriaLabel + "\n" + backupAttemptLogMessage
+            );
         }
 
         const fileList = this.app.vault.getFiles();
@@ -62,9 +66,10 @@ export default class DropboxBackups extends Plugin {
         console.log(`Backup to ${pathPrefix} complete!`);
 
         if (this.dropboxBackupsRibbonIcon) {
-            // @ts-ignore
-            this.dropboxBackupsRibbonIcon.ariaLabel =
-                this.defaultAriaLabel + "\n" + `Last backup: ${pathPrefix}`;
+            this.dropboxBackupsRibbonIcon.setAttribute(
+                "aria-label",
+                this.defaultAriaLabel + "\n" + `Last backup: ${pathPrefix}`
+            );
         }
     }
 
@@ -130,9 +135,7 @@ export default class DropboxBackups extends Plugin {
         if (!this.dbxAuth) {
             this.dbxAuth = new DropboxAuth({
                 clientId: this.CLIENT_ID,
-                // @ts-ignore
                 accessToken: this.storedAccessTokenResponse.access_token,
-                // @ts-ignore
                 refreshToken: this.storedAccessTokenResponse.refresh_token,
             });
         }
