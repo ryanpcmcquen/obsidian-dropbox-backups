@@ -1,12 +1,24 @@
-import { moment, Plugin } from "obsidian";
+import { BlockCache, moment, Platform, Plugin } from "obsidian";
 import "./assets/Dropbox-sdk.js";
 declare var Dropbox: unknown;
 declare var DropboxAuth: unknown;
 
-type accessTokenResponseResultType = {
+interface accessTokenCache extends BlockCache {
     access_token: string;
     refresh_token: string;
-};
+}
+
+interface codeVerifierCache extends BlockCache {
+    codeVerifier: string;
+}
+
+let dropboxBackupsTokenStore: accessTokenCache;
+if (!Platform.isMobile) {
+    dropboxBackupsTokenStore = JSON.parse(
+        localStorage.getItem("dropboxBackupsTokenStore")
+    );
+}
+let dropboxBackupsCodeVerifierStore: codeVerifierCache;
 
 export default class DropboxBackups extends Plugin {
     dbx: unknown;
@@ -19,10 +31,6 @@ export default class DropboxBackups extends Plugin {
     defaultAriaLabel = "Backup to Dropbox";
 
     dropboxBackupsRibbonIcon: HTMLElement;
-
-    storedAccessTokenResponse: accessTokenResponseResultType = JSON.parse(
-        localStorage.getItem("dropboxAccessTokenResponse")
-    );
 
     vaultPath = this.app.vault.getName();
 
@@ -108,19 +116,14 @@ export default class DropboxBackups extends Plugin {
         );
 
         // @ts-ignore
-        sessionStorage.setItem("codeVerifier", this.dbxAuth.getCodeVerifier());
-        // @ts-ignore
-        localStorage.setItem("codeVerifier", this.dbxAuth.getCodeVerifier());
+        dropboxBackupsCodeVerifierStore = this.dbxAuth.getCodeVerifier();
 
         window.open(authUrl);
     }
 
     async doAuth(params: any) {
         // @ts-ignore
-        this.dbxAuth.setCodeVerifier(
-            sessionStorage.getItem("codeVerifier") ||
-                localStorage.getItem("codeVerifier")
-        );
+        this.dbxAuth.setCodeVerifier(dropboxBackupsCodeVerifierStore);
 
         // @ts-ignore
         const accessTokenResponse = await this.dbxAuth.getAccessTokenFromCode(
@@ -128,12 +131,16 @@ export default class DropboxBackups extends Plugin {
             params.code
         );
 
-        const accessTokenResponseResult = accessTokenResponse?.result as accessTokenResponseResultType;
+        const accessTokenResponseResult = accessTokenResponse?.result as accessTokenCache;
 
-        localStorage.setItem(
-            "dropboxAccessTokenResponse",
-            JSON.stringify(accessTokenResponseResult)
-        );
+        if (Platform.isMobile) {
+            dropboxBackupsTokenStore = accessTokenResponseResult;
+        } else {
+            localStorage.setItem(
+                "dropboxBackupsTokenStore",
+                JSON.stringify(accessTokenResponseResult)
+            );
+        }
 
         // @ts-ignore
         this.dbxAuth.setAccessToken(accessTokenResponseResult?.access_token);
@@ -151,8 +158,8 @@ export default class DropboxBackups extends Plugin {
             // @ts-ignore
             this.dbxAuth = new DropboxAuth({
                 clientId: this.CLIENT_ID,
-                accessToken: this.storedAccessTokenResponse.access_token,
-                refreshToken: this.storedAccessTokenResponse.refresh_token,
+                accessToken: dropboxBackupsTokenStore.access_token,
+                refreshToken: dropboxBackupsTokenStore.refresh_token,
             });
         }
 
@@ -168,7 +175,7 @@ export default class DropboxBackups extends Plugin {
     }
 
     async attemptAuth() {
-        if (this.storedAccessTokenResponse) {
+        if (dropboxBackupsTokenStore) {
             await this.doStoredAuth();
         } else {
             await this.setupAuth();
@@ -201,7 +208,9 @@ export default class DropboxBackups extends Plugin {
             }
         );
 
-        this.attemptAuth();
+        if (!Platform.isMobile) {
+            this.attemptAuth();
+        }
 
         this.registerInterval(
             window.setInterval(
