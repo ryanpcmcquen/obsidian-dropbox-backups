@@ -3,26 +3,23 @@ import "./assets/Dropbox-sdk.js";
 declare var Dropbox: unknown;
 declare var DropboxAuth: unknown;
 
-interface accessTokenCache extends BlockCache {
+type accessTokenStore = {
     access_token: string;
     refresh_token: string;
-}
+};
 
 interface codeVerifierCache extends BlockCache {
     codeVerifier: string;
 }
 
-let dropboxBackupsTokenStore: accessTokenCache;
-if (!Platform.isMobile) {
-    dropboxBackupsTokenStore = JSON.parse(
-        localStorage.getItem("dropboxBackupsTokenStore")
-    );
-}
 let dropboxBackupsCodeVerifierStore: codeVerifierCache;
 
 export default class DropboxBackups extends Plugin {
     dbx: unknown;
     dbxAuth: unknown;
+
+    dropboxBackupsTokenStorePath = ".__dropbox_backups_token_store__";
+    dropboxBackupsTokenStore: accessTokenStore;
 
     CLIENT_ID = "40ig42vaqj3762d";
     obsidianProtocol = "obsidian://";
@@ -62,8 +59,8 @@ export default class DropboxBackups extends Plugin {
             for (const file of fileList) {
                 if (this.app.vault.adapter.exists(file.path)) {
                     const fileContents = this.couldBeBinary(file.extension)
-                        ? await this.app.vault.readBinary(file)
-                        : await this.app.vault.read(file);
+                        ? await this.app.vault.adapter.readBinary(file.path)
+                        : await this.app.vault.adapter.read(file.path);
 
                     // @ts-ignore
                     await this.dbx.filesUpload({
@@ -131,16 +128,13 @@ export default class DropboxBackups extends Plugin {
             params.code
         );
 
-        const accessTokenResponseResult = accessTokenResponse?.result as accessTokenCache;
+        const accessTokenResponseResult = accessTokenResponse?.result as accessTokenStore;
 
-        if (Platform.isMobile) {
-            dropboxBackupsTokenStore = accessTokenResponseResult;
-        } else {
-            localStorage.setItem(
-                "dropboxBackupsTokenStore",
-                JSON.stringify(accessTokenResponseResult)
-            );
-        }
+        this.dropboxBackupsTokenStore = accessTokenResponseResult;
+        await this.app.vault.adapter.write(
+            this.dropboxBackupsTokenStorePath,
+            JSON.stringify(this.dropboxBackupsTokenStore)
+        );
 
         // @ts-ignore
         this.dbxAuth.setAccessToken(accessTokenResponseResult?.access_token);
@@ -158,8 +152,8 @@ export default class DropboxBackups extends Plugin {
             // @ts-ignore
             this.dbxAuth = new DropboxAuth({
                 clientId: this.CLIENT_ID,
-                accessToken: dropboxBackupsTokenStore.access_token,
-                refreshToken: dropboxBackupsTokenStore.refresh_token,
+                accessToken: this.dropboxBackupsTokenStore.access_token,
+                refreshToken: this.dropboxBackupsTokenStore.refresh_token,
             });
         }
 
@@ -175,7 +169,7 @@ export default class DropboxBackups extends Plugin {
     }
 
     async attemptAuth() {
-        if (dropboxBackupsTokenStore) {
+        if (this.dropboxBackupsTokenStore) {
             await this.doStoredAuth();
         } else {
             await this.setupAuth();
@@ -193,6 +187,18 @@ export default class DropboxBackups extends Plugin {
     async onload(): Promise<void> {
         console.log("Loading Dropbox Backups plugin ...");
 
+        if (
+            await this.app.vault.adapter.exists(
+                this.dropboxBackupsTokenStorePath
+            )
+        ) {
+            this.dropboxBackupsTokenStore = JSON.parse(
+                await this.app.vault.adapter.read(
+                    this.dropboxBackupsTokenStorePath
+                )
+            );
+        }
+
         this.registerObsidianProtocolHandler(
             this.obsidianProtocolAction,
             async (params) => {
@@ -203,8 +209,8 @@ export default class DropboxBackups extends Plugin {
         this.dropboxBackupsRibbonIcon = this.addRibbonIcon(
             "popup-open",
             this.defaultAriaLabel,
-            () => {
-                this.attemptBackup();
+            async () => {
+                await this.attemptBackup();
             }
         );
 
@@ -217,8 +223,8 @@ export default class DropboxBackups extends Plugin {
                 async () => {
                     await this.attemptBackup();
                 },
-                // Every 10 minutes:
-                60000 * 10
+                // Every 15 minutes:
+                60000 * 15
             )
         );
     }
