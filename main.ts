@@ -203,8 +203,8 @@ export default class DropboxBackups extends Plugin {
         this.dropboxBackupsRibbonIcon = this.addRibbonIcon(
             "popup-open",
             this.defaultAriaLabel,
-            async () => {
-                await this.attemptBackup();
+            () => {
+                this.attemptBackup();
             }
         );
 
