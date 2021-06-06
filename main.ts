@@ -157,7 +157,7 @@ export default class DropboxBackups extends Plugin {
             params.code
         );
 
-        console.log(accessTokenResponse);
+        console.log(JSON.stringify(accessTokenResponse));
 
         const accessTokenResponseResult = accessTokenResponse?.result as accessTokenStore;
         this.dropboxBackupsTokenStore = accessTokenResponseResult;
@@ -173,6 +173,8 @@ export default class DropboxBackups extends Plugin {
         this.dbx = new Dropbox({
             auth: this.dbxAuth,
         });
+
+        console.log(JSON.stringify(this.dbx), JSON.stringify(this.dbxAuth));
 
         await this.backup();
     }
