@@ -72,7 +72,7 @@ export default class DropboxBackups extends Plugin {
 
         const backupAttemptLogMessage = `Attempting backup to: ${pathPrefix}`;
         console.log(backupAttemptLogMessage);
-        if (this.dropboxBackupsRibbonIcon) {
+        if (!Platform.isMobile && this.dropboxBackupsRibbonIcon) {
             this.dropboxBackupsRibbonIcon.setAttribute(
                 "aria-label",
                 this.defaultAriaLabel + "\n" + backupAttemptLogMessage
@@ -103,7 +103,7 @@ export default class DropboxBackups extends Plugin {
 
         console.log(`Backup to ${pathPrefix} complete!`);
 
-        if (this.dropboxBackupsRibbonIcon) {
+        if (!Platform.isMobile && this.dropboxBackupsRibbonIcon) {
             this.dropboxBackupsRibbonIcon.setAttribute(
                 "aria-label",
                 this.defaultAriaLabel + "\n" + `Last backup: ${pathPrefix}`
