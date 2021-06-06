@@ -86,13 +86,16 @@ export default class DropboxBackups extends Plugin {
                     const fileContents = this.couldBeBinary(file.extension)
                         ? await this.app.vault.adapter.readBinary(file.path)
                         : await this.app.vault.adapter.read(file.path);
-
-                    await this.dbx.filesUpload({
-                        path: `${pathPrefix}/${file.path}`,
-                        mode: "add",
-                        mute: true,
-                        contents: fileContents,
-                    });
+                    try {
+                        await this.dbx.filesUpload({
+                            path: `${pathPrefix}/${file.path}`,
+                            mode: "add",
+                            mute: true,
+                            contents: fileContents,
+                        });
+                    } catch (err) {
+                        console.error(err);
+                    }
                 }
             }
         }
