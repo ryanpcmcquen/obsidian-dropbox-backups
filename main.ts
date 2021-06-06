@@ -61,6 +61,9 @@ export default class DropboxBackups extends Plugin {
     }
 
     async backup(): Promise<void> {
+        if (!this.dbx) {
+            await this.attemptAuth();
+        }
         const now = Date.now();
 
         const year = moment(new Date(now)).format("YYYY");
@@ -81,7 +84,6 @@ export default class DropboxBackups extends Plugin {
         }
 
         const fileList = this.app.vault.getFiles();
-        console.log(fileList);
 
         if (fileList.length > 0) {
             for (const file of fileList) {
