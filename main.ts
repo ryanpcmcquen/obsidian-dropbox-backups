@@ -1,4 +1,4 @@
-import { BlockCache, moment, Platform, Plugin } from "obsidian";
+import { BlockCache, moment, Platform, Plugin, setIcon } from "obsidian";
 import "./assets/Dropbox-sdk.js";
 declare var Dropbox: unknown;
 declare var DropboxAuth: unknown;
@@ -79,6 +79,7 @@ export default class DropboxBackups extends Plugin {
                 this.defaultAriaLabel + "\n" + backupAttemptLogMessage
             );
         }
+        setIcon(this.dropboxBackupsRibbonIcon, "sync");
 
         const fileList = this.app.vault.getFiles();
 
@@ -112,6 +113,7 @@ export default class DropboxBackups extends Plugin {
                 this.defaultAriaLabel + "\n" + `Last backup: ${pathPrefix}`
             );
         }
+        setIcon(this.dropboxBackupsRibbonIcon, "cloud");
     }
 
     async setupAuth() {
@@ -244,7 +246,7 @@ export default class DropboxBackups extends Plugin {
         );
 
         this.dropboxBackupsRibbonIcon = this.addRibbonIcon(
-            "popup-open",
+            "cloud",
             this.defaultAriaLabel,
             async () => {
                 try {
