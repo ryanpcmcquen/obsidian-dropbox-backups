@@ -118,6 +118,7 @@ export default class DropboxBackups extends Plugin {
         this.dbxAuth = new DropboxAuth({
             clientId: this.CLIENT_ID,
         });
+        console.log(this.dbxAuth);
 
         // From the Dropbox docs:
         // getAuthenticationUrl(
@@ -141,10 +142,11 @@ export default class DropboxBackups extends Plugin {
                 true
             )
         );
+        console.log(authUrl);
 
         // @ts-ignore
         dropboxBackupsCodeVerifierStore = this.dbxAuth.getCodeVerifier();
-
+        console.log(dropboxBackupsCodeVerifierStore);
         window.open(authUrl);
     }
 
