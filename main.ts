@@ -247,12 +247,14 @@ export default class DropboxBackups extends Plugin {
             }
         );
 
-        this.attemptAuth();
-
         this.registerInterval(
             window.setInterval(
                 async () => {
-                    await this.attemptBackup();
+                    try {
+                        await this.attemptBackup();
+                    } catch (ignore) {
+                        await this.attemptAuth();
+                    }
                 },
                 // Every 15 minutes:
                 60000 * 15
