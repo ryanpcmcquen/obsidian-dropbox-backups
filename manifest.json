@@ -1,7 +1,7 @@
 {
     "id": "obsidian-dropbox-backups",
     "name": "Dropbox Backups",
-    "version": "0.12.3",
+    "version": "0.12.4",
     "minAppVersion": "0.9.12",
     "description": "Automated backups to Dropbox for your enjoyment.",
     "author": "ryanpcmcquen",

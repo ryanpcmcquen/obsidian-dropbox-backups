@@ -1,4 +1,4 @@
-import { BlockCache, moment, Platform, Plugin, setIcon } from "obsidian";
+import { moment, Platform, Plugin, setIcon } from "obsidian";
 import "./assets/Dropbox-sdk.js";
 declare var Dropbox: unknown;
 declare var DropboxAuth: unknown;
@@ -8,11 +8,7 @@ type accessTokenStore = {
     refresh_token: string;
 };
 
-interface codeVerifierCache extends BlockCache {
-    codeVerifier: string;
-}
-
-let dropboxBackupsCodeVerifierStore: codeVerifierCache;
+let dropboxBackupsCodeVerifier: string;
 
 // Call this method inside your plugin's
 // `onload` function like so:
@@ -146,7 +142,7 @@ export default class DropboxBackups extends Plugin {
         );
 
         // @ts-ignore
-        dropboxBackupsCodeVerifierStore.codeVerifier = this.dbxAuth.getCodeVerifier();
+        dropboxBackupsCodeVerifier = this.dbxAuth.getCodeVerifier();
 
         // This fails on mobile, probably because it is delayed:
         // window.open(authUrl)
@@ -155,9 +151,7 @@ export default class DropboxBackups extends Plugin {
 
     async doAuth(params: any) {
         // @ts-ignore
-        this.dbxAuth.setCodeVerifier(
-            dropboxBackupsCodeVerifierStore.codeVerifier
-        );
+        this.dbxAuth.setCodeVerifier(dropboxBackupsCodeVerifier);
 
         // @ts-ignore
         const accessTokenResponse = await this.dbxAuth.getAccessTokenFromCode(
