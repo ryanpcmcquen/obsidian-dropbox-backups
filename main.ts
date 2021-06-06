@@ -72,6 +72,7 @@ export default class DropboxBackups extends Plugin {
 
         const backupAttemptLogMessage = `Attempting backup to: ${pathPrefix}`;
         console.log(backupAttemptLogMessage);
+
         if (!Platform.isMobile && this.dropboxBackupsRibbonIcon) {
             this.dropboxBackupsRibbonIcon.setAttribute(
                 "aria-label",
@@ -80,6 +81,8 @@ export default class DropboxBackups extends Plugin {
         }
 
         const fileList = this.app.vault.getFiles();
+        console.log(fileList);
+
         if (fileList.length > 0) {
             for (const file of fileList) {
                 if (this.app.vault.adapter.exists(file.path)) {
@@ -95,7 +98,7 @@ export default class DropboxBackups extends Plugin {
                             contents: fileContents,
                         });
                     } catch (err) {
-                        throw new Error(err);
+                        console.error(err);
                     }
                 }
             }
