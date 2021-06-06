@@ -147,7 +147,8 @@ export default class DropboxBackups extends Plugin {
         // @ts-ignore
         dropboxBackupsCodeVerifierStore = this.dbxAuth.getCodeVerifier();
         console.log(dropboxBackupsCodeVerifierStore);
-        window.open(authUrl);
+        console.log(window.open(authUrl));
+        console.log(window.location.assign(authUrl));
     }
 
     async doAuth(params: any) {
