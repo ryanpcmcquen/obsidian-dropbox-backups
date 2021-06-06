@@ -200,8 +200,10 @@ export default class DropboxBackups extends Plugin {
 
     async attemptAuth() {
         if (this.dropboxBackupsTokenStore) {
+            console.log("Attempting stored auth ...");
             await this.doStoredAuth();
         } else {
+            console.log("Attempting auth setup ...");
             await this.setupAuth();
         }
     }
