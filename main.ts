@@ -14,8 +14,8 @@ interface codeVerifierCache extends BlockCache {
 
 let dropboxBackupsCodeVerifierStore: codeVerifierCache;
 
-// Call this method inside your plugin's `onLoad` function,
-// like so:
+// Call this method inside your plugin's
+// `onload` function like so:
 // monkeyPatchConsole(this);
 const monkeyPatchConsole = (plugin: Plugin) => {
     if (!Platform.isMobile) {
@@ -95,7 +95,7 @@ export default class DropboxBackups extends Plugin {
                             contents: fileContents,
                         });
                     } catch (err) {
-                        console.error(err);
+                        throw new Error(err);
                     }
                 }
             }
@@ -112,42 +112,38 @@ export default class DropboxBackups extends Plugin {
     }
 
     async setupAuth() {
-        try {
+        // @ts-ignore
+        this.dbxAuth = new DropboxAuth({
+            clientId: this.CLIENT_ID,
+        });
+
+        // From the Dropbox docs:
+        // getAuthenticationUrl(
+        //     redirectUri,
+        //     state,
+        //     authType = 'token',
+        //     tokenAccessType = null,
+        //     scope = null,
+        //     includeGrantedScopes = 'none',
+        //     usePKCE = false
+        // )
+        const authUrl = String(
             // @ts-ignore
-            this.dbxAuth = new DropboxAuth({
-                clientId: this.CLIENT_ID,
-            });
+            await this.dbxAuth.getAuthenticationUrl(
+                this.obsidianProtocolActionUrl,
+                undefined,
+                "code",
+                "offline",
+                undefined,
+                undefined,
+                true
+            )
+        );
 
-            // From the Dropbox docs:
-            // getAuthenticationUrl(
-            //     redirectUri,
-            //     state,
-            //     authType = 'token',
-            //     tokenAccessType = null,
-            //     scope = null,
-            //     includeGrantedScopes = 'none',
-            //     usePKCE = false
-            // )
-            const authUrl = String(
-                // @ts-ignore
-                await this.dbxAuth.getAuthenticationUrl(
-                    this.obsidianProtocolActionUrl,
-                    undefined,
-                    "code",
-                    "offline",
-                    undefined,
-                    undefined,
-                    true
-                )
-            );
+        // @ts-ignore
+        dropboxBackupsCodeVerifierStore = this.dbxAuth.getCodeVerifier();
 
-            // @ts-ignore
-            dropboxBackupsCodeVerifierStore = this.dbxAuth.getCodeVerifier();
-
-            window.open(authUrl);
-        } catch (err) {
-            console.error(err);
-        }
+        window.open(authUrl);
     }
 
     async doAuth(params: any) {
@@ -243,13 +239,15 @@ export default class DropboxBackups extends Plugin {
             "popup-open",
             this.defaultAriaLabel,
             async () => {
-                await this.attemptBackup();
+                try {
+                    await this.attemptBackup();
+                } catch (ignore) {
+                    await this.attemptAuth();
+                }
             }
         );
 
-        if (!Platform.isMobile) {
-            this.attemptAuth();
-        }
+        this.attemptAuth();
 
         this.registerInterval(
             window.setInterval(
