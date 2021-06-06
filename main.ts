@@ -61,14 +61,17 @@ export default class DropboxBackups extends Plugin {
                     const fileContents = this.couldBeBinary(file.extension)
                         ? await this.app.vault.adapter.readBinary(file.path)
                         : await this.app.vault.adapter.read(file.path);
-
-                    // @ts-ignore
-                    await this.dbx.filesUpload({
-                        path: `${pathPrefix}/${file.path}`,
-                        mode: "overwrite",
-                        mute: true,
-                        contents: fileContents,
-                    });
+                    try {
+                        // @ts-ignore
+                        await this.dbx.filesUpload({
+                            path: `${pathPrefix}/${file.path}`,
+                            mode: "overwrite",
+                            mute: true,
+                            contents: fileContents,
+                        });
+                    } catch (err) {
+                        console.error(err);
+                    }
                 }
             }
         }
@@ -84,38 +87,42 @@ export default class DropboxBackups extends Plugin {
     }
 
     async setupAuth() {
-        // @ts-ignore
-        this.dbxAuth = new DropboxAuth({
-            clientId: this.CLIENT_ID,
-        });
-
-        // From the Dropbox docs:
-        // getAuthenticationUrl(
-        //     redirectUri,
-        //     state,
-        //     authType = 'token',
-        //     tokenAccessType = null,
-        //     scope = null,
-        //     includeGrantedScopes = 'none',
-        //     usePKCE = false
-        // )
-        const authUrl = String(
+        try {
             // @ts-ignore
-            await this.dbxAuth.getAuthenticationUrl(
-                this.obsidianProtocolActionUrl,
-                undefined,
-                "code",
-                "offline",
-                undefined,
-                undefined,
-                true
-            )
-        );
+            this.dbxAuth = new DropboxAuth({
+                clientId: this.CLIENT_ID,
+            });
 
-        // @ts-ignore
-        dropboxBackupsCodeVerifierStore = this.dbxAuth.getCodeVerifier();
+            // From the Dropbox docs:
+            // getAuthenticationUrl(
+            //     redirectUri,
+            //     state,
+            //     authType = 'token',
+            //     tokenAccessType = null,
+            //     scope = null,
+            //     includeGrantedScopes = 'none',
+            //     usePKCE = false
+            // )
+            const authUrl = String(
+                // @ts-ignore
+                await this.dbxAuth.getAuthenticationUrl(
+                    this.obsidianProtocolActionUrl,
+                    undefined,
+                    "code",
+                    "offline",
+                    undefined,
+                    undefined,
+                    true
+                )
+            );
 
-        window.open(authUrl);
+            // @ts-ignore
+            dropboxBackupsCodeVerifierStore = this.dbxAuth.getCodeVerifier();
+
+            window.open(authUrl);
+        } catch (err) {
+            console.error(err);
+        }
     }
 
     async doAuth(params: any) {
