@@ -232,7 +232,7 @@ export default class DropboxBackups extends Plugin {
                     this.dropboxBackupsTokenStorePath
                 )
             );
-            console.log(this.dropboxBackupsTokenStore);
+            console.log(JSON.stringify(this.dropboxBackupsTokenStore));
         }
 
         this.registerObsidianProtocolHandler(
