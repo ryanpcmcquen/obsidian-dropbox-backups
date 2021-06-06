@@ -7,3 +7,5 @@ sed -i.bak "s/exports.Dropbox = Dropbox;/window.Dropbox = Dropbox;/g" assets/Dro
 sed -i.bak "s/exports.DropboxAuth = DropboxAuth;/window.DropboxAuth = DropboxAuth;/g" assets/Dropbox-sdk.js
 
 rm assets/Dropbox-sdk.js.bak
+
+curl https://cdn.jsdelivr.net/npm/dropbox@9/types/index.d.ts -o assets/Dropbox-sdk.d.ts
