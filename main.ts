@@ -61,7 +61,7 @@ export default class DropboxBackups extends Plugin {
     }
 
     async backup(): Promise<void> {
-        if (!this.dbx) {
+        if (!this.dbx || !this.dbxAuth) {
             await this.attemptAuth();
         }
         const now = Date.now();
