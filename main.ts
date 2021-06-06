@@ -61,9 +61,6 @@ export default class DropboxBackups extends Plugin {
     }
 
     async backup(): Promise<void> {
-        if (!this.dbx || !this.dbxAuth) {
-            await this.attemptAuth();
-        }
         const now = Date.now();
 
         const year = moment(new Date(now)).format("YYYY");
@@ -118,7 +115,6 @@ export default class DropboxBackups extends Plugin {
         this.dbxAuth = new DropboxAuth({
             clientId: this.CLIENT_ID,
         });
-        console.log(this.dbxAuth);
 
         // From the Dropbox docs:
         // getAuthenticationUrl(
@@ -142,13 +138,13 @@ export default class DropboxBackups extends Plugin {
                 true
             )
         );
-        console.log(authUrl);
 
         // @ts-ignore
         dropboxBackupsCodeVerifierStore = this.dbxAuth.getCodeVerifier();
-        console.log(dropboxBackupsCodeVerifierStore);
-        console.log(window.open(authUrl));
-        console.log(window.location.assign(authUrl));
+
+        // This fails on mobile, probably because it is delayed:
+        // window.open(authUrl)
+        window.location.assign(authUrl);
     }
 
     async doAuth(params: any) {
@@ -161,8 +157,9 @@ export default class DropboxBackups extends Plugin {
             params.code
         );
 
-        const accessTokenResponseResult = accessTokenResponse?.result as accessTokenStore;
+        console.log(accessTokenResponse);
 
+        const accessTokenResponseResult = accessTokenResponse?.result as accessTokenStore;
         this.dropboxBackupsTokenStore = accessTokenResponseResult;
         await this.app.vault.adapter.write(
             this.dropboxBackupsTokenStorePath,
@@ -253,6 +250,8 @@ export default class DropboxBackups extends Plugin {
                 }
             }
         );
+
+        this.attemptAuth();
 
         this.registerInterval(
             window.setInterval(
