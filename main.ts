@@ -14,11 +14,36 @@ interface codeVerifierCache extends BlockCache {
 
 let dropboxBackupsCodeVerifierStore: codeVerifierCache;
 
+// Call this method inside your plugin's `onLoad` function,
+// like so:
+// monkeyPatchConsole(this);
+const monkeyPatchConsole = (plugin: Plugin) => {
+    if (!Platform.isMobile) {
+        return;
+    }
+
+    const logFile = `${plugin.manifest.dir}/logs.txt`;
+    const logs: string[] = [];
+    const logMessages = (prefix: string) => (...messages: unknown[]) => {
+        logs.push(`\n[${prefix}]`);
+        for (const message of messages) {
+            logs.push(String(message));
+        }
+        plugin.app.vault.adapter.write(logFile, logs.join(" "));
+    };
+
+    console.debug = logMessages("debug");
+    console.error = logMessages("error");
+    console.info = logMessages("info");
+    console.log = logMessages("log");
+    console.warn = logMessages("warn");
+};
+
 export default class DropboxBackups extends Plugin {
     dbx: unknown;
     dbxAuth: unknown;
 
-    dropboxBackupsTokenStorePath = ".__dropbox_backups_token_store__";
+    dropboxBackupsTokenStorePath = `${this.manifest.dir}/.__dropbox_backups_token_store__`;
     dropboxBackupsTokenStore: accessTokenStore;
 
     CLIENT_ID = "40ig42vaqj3762d";
@@ -192,6 +217,7 @@ export default class DropboxBackups extends Plugin {
     }
 
     async onload(): Promise<void> {
+        monkeyPatchConsole(this);
         console.log("Loading Dropbox Backups plugin ...");
 
         if (
