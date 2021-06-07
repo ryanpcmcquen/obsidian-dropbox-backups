@@ -18,12 +18,27 @@ Underneath that folder, backups get stored as:
 
 We use fractional seconds to prevent collisions with ad hoc backups.
 
-<img width="359" alt="Screen Shot 2021-06-06 at 3 37 30 PM" src="https://user-images.githubusercontent.com/772937/120942369-5caf5a80-c6dd-11eb-8340-92f807d8fa73.png">
-<img width="352" alt="Screen Shot 2021-06-06 at 3 37 38 PM" src="https://user-images.githubusercontent.com/772937/120942370-5d47f100-c6dd-11eb-95de-f1f364b9bb24.png">
-
 ### Usage
 
 Click the icon to authenticate with Dropbox. After that, backups will happen every 15 minutes. You can also fire off a backup at any time by clicking the ribbon icon.
+
+The slashed cloud indicates that you need to authenticate with Dropbox:
+
+<img width="222" alt="Screen Shot 2021-06-07 at 9 57 49 AM" src="https://user-images.githubusercontent.com/772937/121060384-68e7f600-c777-11eb-98df-093799e28eca.png">
+
+The large arrow indicates the the upload has started:
+
+<img width="353" alt="Screen Shot 2021-06-07 at 9 58 19 AM" src="https://user-images.githubusercontent.com/772937/121060390-6ab1b980-c777-11eb-8663-86d53f6ad893.png">
+
+The small arrow inside the cloud indicates the upload is about 50% done:
+
+<img width="362" alt="Screen Shot 2021-06-07 at 9 57 59 AM" src="https://user-images.githubusercontent.com/772937/121060385-69808c80-c777-11eb-9251-e6e2a92ddb72.png">
+
+The cloud with a check mark indicates that the backup is complete!
+
+<img width="351" alt="Screen Shot 2021-06-07 at 9 58 13 AM" src="https://user-images.githubusercontent.com/772937/121060387-6a192300-c777-11eb-83de-a6c71c8b71af.png">
+
+
 
 ### Dropbox permissions
 
