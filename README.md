@@ -39,6 +39,9 @@ The cloud with a check mark indicates that the backup is complete!
 <img width="351" alt="Screen Shot 2021-06-07 at 9 58 13 AM" src="https://user-images.githubusercontent.com/772937/121060387-6a192300-c777-11eb-83de-a6c71c8b71af.png">
 
 
+Demo:
+
+![Demo](https://github.com/ryanpcmcquen/obsidian-dropbox-backups/raw/master/obsidian-dropbox-backups-demo-v1.gif)
 
 ### Dropbox permissions
 
