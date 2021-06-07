@@ -1,0 +1,9 @@
+[aria-label^="Backup to Dropbox"] svg {
+    fill: var(--text-faint);
+    stroke: var(--text-faint);
+}
+
+[aria-label^="Backup to Dropbox"]:hover svg {
+    fill: var(--text-muted);
+    stroke: var(--text-muted);
+}
