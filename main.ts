@@ -297,8 +297,8 @@ export default class DropboxBackups extends Plugin {
                         await this.attemptAuth();
                     }
                 },
-                // Every 15 minutes:
-                60000 * 15
+                // Every 20 minutes:
+                60000 * 20
             )
         );
     }

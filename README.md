@@ -1,6 +1,6 @@
 ## Obsidian Dropbox Backups
 
-Automated backups to Dropbox of your entire vault every 15 minutes.
+Automated backups to Dropbox of your entire vault every 20 minutes.
 
 ![Obsidian Dropbox Backups logo](256x256_obsidian-dropbox-backups.png)
 
@@ -20,7 +20,7 @@ We use fractional seconds to prevent collisions with ad hoc backups.
 
 ### Usage
 
-Click the icon to authenticate with Dropbox. After that, backups will happen every 15 minutes. You can also fire off a backup at any time by clicking the ribbon icon.
+Click the icon to authenticate with Dropbox. After that, backups will happen every 20 minutes. You can also fire off a backup at any time by clicking the ribbon icon.
 
 The slashed cloud indicates that you need to authenticate with Dropbox:
 
@@ -37,7 +37,6 @@ The small arrow inside the cloud indicates the upload is about 50% done:
 The cloud with a check mark indicates that the backup is complete!
 
 <img width="351" alt="Screen Shot 2021-06-07 at 9 58 13 AM" src="https://user-images.githubusercontent.com/772937/121060387-6a192300-c777-11eb-83de-a6c71c8b71af.png">
-
 
 Demo:
 
