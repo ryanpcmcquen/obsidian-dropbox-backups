@@ -20,13 +20,15 @@ const monkeyPatchConsole = (plugin: Plugin) => {
 
     const logFile = `${plugin.manifest.dir}/logs.txt`;
     const logs: string[] = [];
-    const logMessages = (prefix: string) => (...messages: unknown[]) => {
-        logs.push(`\n[${prefix}]`);
-        for (const message of messages) {
-            logs.push(String(message));
-        }
-        plugin.app.vault.adapter.write(logFile, logs.join(" "));
-    };
+    const logMessages =
+        (prefix: string) =>
+        (...messages: unknown[]) => {
+            logs.push(`\n[${prefix}]`);
+            for (const message of messages) {
+                logs.push(String(message));
+            }
+            plugin.app.vault.adapter.write(logFile, logs.join(" "));
+        };
 
     console.debug = logMessages("debug");
     console.error = logMessages("error");
@@ -38,6 +40,8 @@ const monkeyPatchConsole = (plugin: Plugin) => {
 export default class DropboxBackups extends Plugin {
     dbx: unknown;
     dbxAuth: unknown;
+
+    backupsQueue: number[] = [];
 
     icons = {
         cloudSlash: `
@@ -73,6 +77,12 @@ export default class DropboxBackups extends Plugin {
 
     async backup(): Promise<void> {
         const now = Date.now();
+        let status = "complete";
+
+        this.backupsQueue.push(now);
+        if (this.backupsQueue.length > 1) {
+            this.backupsQueue = [now];
+        }
 
         const year = moment(new Date(now)).format("YYYY");
         const month = moment(new Date(now)).format("MM");
@@ -97,6 +107,10 @@ export default class DropboxBackups extends Plugin {
         if (fileList.length > 0) {
             let counter = 0;
             for (const file of fileList) {
+                if (!this.backupsQueue.includes(now)) {
+                    status = "canceled";
+                    break;
+                }
                 if (this.app.vault.adapter.exists(file.path)) {
                     const fileContents = this.couldBeBinary(file.extension)
                         ? await this.app.vault.adapter.readBinary(file.path)
@@ -125,7 +139,7 @@ export default class DropboxBackups extends Plugin {
             }
         }
 
-        console.log(`Backup to ${pathPrefix} complete!`);
+        console.log(`Backup to ${pathPrefix} ${status}!`);
 
         if (!Platform.isMobile && this.dropboxBackupsRibbonIcon) {
             this.dropboxBackupsRibbonIcon.setAttribute(
@@ -137,6 +151,11 @@ export default class DropboxBackups extends Plugin {
             this.dropboxBackupsRibbonIcon,
             "dropbox-backups-upload-complete"
         );
+
+        const indexOfNow = this.backupsQueue.indexOf(now);
+        if (indexOfNow > -1) {
+            this.backupsQueue.splice(indexOfNow, 1);
+        }
     }
 
     async setupAuth() {
@@ -186,7 +205,8 @@ export default class DropboxBackups extends Plugin {
             params.code
         );
 
-        const accessTokenResponseResult = accessTokenResponse?.result as accessTokenStore;
+        const accessTokenResponseResult =
+            accessTokenResponse?.result as accessTokenStore;
         this.dropboxBackupsTokenStore = accessTokenResponseResult;
         await this.app.vault.adapter.write(
             this.dropboxBackupsTokenStorePath,
