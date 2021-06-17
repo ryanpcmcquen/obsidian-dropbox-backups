@@ -1,6 +1,6 @@
 {
     "name": "obsidian-dropbox-backups",
-    "version": "0.14.0",
+    "version": "0.14.1",
     "description": "Automated backups to Dropbox for your enjoyment.",
     "main": "main.js",
     "repository": "https://github.com/ryanpcmcquen/obsidian-dropbox-backups",
@@ -18,9 +18,9 @@
         "@rollup/plugin-typescript": "^8.2.1",
         "@types/node": "^14.17.3",
         "obsidian": "^0.12.5",
-        "rollup": "^2.51.2",
-        "tslib": "^2.2.0",
-        "typescript": "^4.2.4"
+        "rollup": "^2.52.1",
+        "tslib": "^2.3.0",
+        "typescript": "^4.3.3"
     },
     "dependencies": {}
 }
