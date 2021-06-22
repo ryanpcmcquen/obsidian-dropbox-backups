@@ -1,7 +1,5 @@
 import { addIcon, moment, Platform, Plugin, setIcon } from "obsidian";
-import "./assets/Dropbox-sdk.js";
-declare var Dropbox: unknown;
-declare var DropboxAuth: unknown;
+import { Dropbox, DropboxAuth, files } from "./assets/Dropbox-sdk.js";
 
 type accessTokenStore = {
     access_token: string;
@@ -36,8 +34,8 @@ const monkeyPatchConsole = (plugin: Plugin) => {
 };
 
 export default class DropboxBackups extends Plugin {
-    dbx: unknown;
-    dbxAuth: unknown;
+    dbx: Dropbox;
+    dbxAuth: DropboxAuth;
 
     currentBackupTime: number;
 
@@ -112,10 +110,9 @@ export default class DropboxBackups extends Plugin {
                         : await this.app.vault.adapter.read(file.path);
 
                     try {
-                        // @ts-ignore
                         await this.dbx.filesUpload({
                             path: `${pathPrefix}/${file.path}`,
-                            mode: "add",
+                            mode: ("add" as unknown) as files.WriteModeAdd,
                             mute: true,
                             contents: fileContents,
                         });
@@ -149,7 +146,6 @@ export default class DropboxBackups extends Plugin {
     }
 
     async setupAuth() {
-        // @ts-ignore
         this.dbxAuth = new DropboxAuth({
             clientId: this.CLIENT_ID,
         });
@@ -165,7 +161,6 @@ export default class DropboxBackups extends Plugin {
         //     usePKCE = false
         // )
         const authUrl = String(
-            // @ts-ignore
             await this.dbxAuth.getAuthenticationUrl(
                 this.obsidianProtocolActionUrl,
                 undefined,
@@ -177,7 +172,6 @@ export default class DropboxBackups extends Plugin {
             )
         );
 
-        // @ts-ignore
         dropboxBackupsCodeVerifier = this.dbxAuth.getCodeVerifier();
 
         // This fails on mobile, probably because it is delayed:
@@ -186,10 +180,8 @@ export default class DropboxBackups extends Plugin {
     }
 
     async doAuth(params: any) {
-        // @ts-ignore
         this.dbxAuth.setCodeVerifier(dropboxBackupsCodeVerifier);
 
-        // @ts-ignore
         const accessTokenResponse = await this.dbxAuth.getAccessTokenFromCode(
             this.obsidianProtocolActionUrl,
             params.code
@@ -202,10 +194,8 @@ export default class DropboxBackups extends Plugin {
             JSON.stringify(this.dropboxBackupsTokenStore)
         );
 
-        // @ts-ignore
         this.dbxAuth.setAccessToken(accessTokenResponseResult?.access_token);
 
-        // @ts-ignore
         this.dbx = new Dropbox({
             auth: this.dbxAuth,
         });
@@ -215,7 +205,6 @@ export default class DropboxBackups extends Plugin {
 
     async doStoredAuth(): Promise<void> {
         if (!this.dbxAuth) {
-            // @ts-ignore
             this.dbxAuth = new DropboxAuth({
                 clientId: this.CLIENT_ID,
                 accessToken: this.dropboxBackupsTokenStore.access_token,
@@ -223,10 +212,8 @@ export default class DropboxBackups extends Plugin {
             });
         }
 
-        // @ts-ignore
         await this.dbxAuth.checkAndRefreshAccessToken();
 
-        // @ts-ignore
         this.dbx = new Dropbox({
             auth: this.dbxAuth,
         });

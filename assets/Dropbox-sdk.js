@@ -1,4467 +1,3073 @@
-(function (global, factory) {
-  typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
-  typeof define === 'function' && define.amd ? define(['exports'], factory) :
-  (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Dropbox = {}));
-}(this, (function (exports) { 'use strict';
-
-  function _classCallCheck(instance, Constructor) {
-    if (!(instance instanceof Constructor)) {
-      throw new TypeError("Cannot call a class as a function");
+var global$1 = typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {};
+var lookup = [];
+var revLookup = [];
+var Arr = typeof Uint8Array !== "undefined" ? Uint8Array : Array;
+var inited = false;
+function init() {
+  inited = true;
+  var code = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  for (var i = 0, len = code.length; i < len; ++i) {
+    lookup[i] = code[i];
+    revLookup[code.charCodeAt(i)] = i;
+  }
+  revLookup["-".charCodeAt(0)] = 62;
+  revLookup["_".charCodeAt(0)] = 63;
+}
+function toByteArray(b642) {
+  if (!inited) {
+    init();
+  }
+  var i, j, l, tmp, placeHolders, arr;
+  var len = b642.length;
+  if (len % 4 > 0) {
+    throw new Error("Invalid string. Length must be a multiple of 4");
+  }
+  placeHolders = b642[len - 2] === "=" ? 2 : b642[len - 1] === "=" ? 1 : 0;
+  arr = new Arr(len * 3 / 4 - placeHolders);
+  l = placeHolders > 0 ? len - 4 : len;
+  var L = 0;
+  for (i = 0, j = 0; i < l; i += 4, j += 3) {
+    tmp = revLookup[b642.charCodeAt(i)] << 18 | revLookup[b642.charCodeAt(i + 1)] << 12 | revLookup[b642.charCodeAt(i + 2)] << 6 | revLookup[b642.charCodeAt(i + 3)];
+    arr[L++] = tmp >> 16 & 255;
+    arr[L++] = tmp >> 8 & 255;
+    arr[L++] = tmp & 255;
+  }
+  if (placeHolders === 2) {
+    tmp = revLookup[b642.charCodeAt(i)] << 2 | revLookup[b642.charCodeAt(i + 1)] >> 4;
+    arr[L++] = tmp & 255;
+  } else if (placeHolders === 1) {
+    tmp = revLookup[b642.charCodeAt(i)] << 10 | revLookup[b642.charCodeAt(i + 1)] << 4 | revLookup[b642.charCodeAt(i + 2)] >> 2;
+    arr[L++] = tmp >> 8 & 255;
+    arr[L++] = tmp & 255;
+  }
+  return arr;
+}
+function tripletToBase64(num) {
+  return lookup[num >> 18 & 63] + lookup[num >> 12 & 63] + lookup[num >> 6 & 63] + lookup[num & 63];
+}
+function encodeChunk(uint8, start, end) {
+  var tmp;
+  var output = [];
+  for (var i = start; i < end; i += 3) {
+    tmp = (uint8[i] << 16) + (uint8[i + 1] << 8) + uint8[i + 2];
+    output.push(tripletToBase64(tmp));
+  }
+  return output.join("");
+}
+function fromByteArray(uint8) {
+  if (!inited) {
+    init();
+  }
+  var tmp;
+  var len = uint8.length;
+  var extraBytes = len % 3;
+  var output = "";
+  var parts = [];
+  var maxChunkLength = 16383;
+  for (var i = 0, len2 = len - extraBytes; i < len2; i += maxChunkLength) {
+    parts.push(encodeChunk(uint8, i, i + maxChunkLength > len2 ? len2 : i + maxChunkLength));
+  }
+  if (extraBytes === 1) {
+    tmp = uint8[len - 1];
+    output += lookup[tmp >> 2];
+    output += lookup[tmp << 4 & 63];
+    output += "==";
+  } else if (extraBytes === 2) {
+    tmp = (uint8[len - 2] << 8) + uint8[len - 1];
+    output += lookup[tmp >> 10];
+    output += lookup[tmp >> 4 & 63];
+    output += lookup[tmp << 2 & 63];
+    output += "=";
+  }
+  parts.push(output);
+  return parts.join("");
+}
+function read(buffer, offset, isLE, mLen, nBytes) {
+  var e, m;
+  var eLen = nBytes * 8 - mLen - 1;
+  var eMax = (1 << eLen) - 1;
+  var eBias = eMax >> 1;
+  var nBits = -7;
+  var i = isLE ? nBytes - 1 : 0;
+  var d = isLE ? -1 : 1;
+  var s = buffer[offset + i];
+  i += d;
+  e = s & (1 << -nBits) - 1;
+  s >>= -nBits;
+  nBits += eLen;
+  for (; nBits > 0; e = e * 256 + buffer[offset + i], i += d, nBits -= 8) {
+  }
+  m = e & (1 << -nBits) - 1;
+  e >>= -nBits;
+  nBits += mLen;
+  for (; nBits > 0; m = m * 256 + buffer[offset + i], i += d, nBits -= 8) {
+  }
+  if (e === 0) {
+    e = 1 - eBias;
+  } else if (e === eMax) {
+    return m ? NaN : (s ? -1 : 1) * Infinity;
+  } else {
+    m = m + Math.pow(2, mLen);
+    e = e - eBias;
+  }
+  return (s ? -1 : 1) * m * Math.pow(2, e - mLen);
+}
+function write(buffer, value, offset, isLE, mLen, nBytes) {
+  var e, m, c;
+  var eLen = nBytes * 8 - mLen - 1;
+  var eMax = (1 << eLen) - 1;
+  var eBias = eMax >> 1;
+  var rt = mLen === 23 ? Math.pow(2, -24) - Math.pow(2, -77) : 0;
+  var i = isLE ? 0 : nBytes - 1;
+  var d = isLE ? 1 : -1;
+  var s = value < 0 || value === 0 && 1 / value < 0 ? 1 : 0;
+  value = Math.abs(value);
+  if (isNaN(value) || value === Infinity) {
+    m = isNaN(value) ? 1 : 0;
+    e = eMax;
+  } else {
+    e = Math.floor(Math.log(value) / Math.LN2);
+    if (value * (c = Math.pow(2, -e)) < 1) {
+      e--;
+      c *= 2;
+    }
+    if (e + eBias >= 1) {
+      value += rt / c;
+    } else {
+      value += rt * Math.pow(2, 1 - eBias);
+    }
+    if (value * c >= 2) {
+      e++;
+      c /= 2;
+    }
+    if (e + eBias >= eMax) {
+      m = 0;
+      e = eMax;
+    } else if (e + eBias >= 1) {
+      m = (value * c - 1) * Math.pow(2, mLen);
+      e = e + eBias;
+    } else {
+      m = value * Math.pow(2, eBias - 1) * Math.pow(2, mLen);
+      e = 0;
     }
   }
-
-  function _defineProperties(target, props) {
-    for (var i = 0; i < props.length; i++) {
-      var descriptor = props[i];
-      descriptor.enumerable = descriptor.enumerable || false;
-      descriptor.configurable = true;
-      if ("value" in descriptor) descriptor.writable = true;
-      Object.defineProperty(target, descriptor.key, descriptor);
+  for (; mLen >= 8; buffer[offset + i] = m & 255, i += d, m /= 256, mLen -= 8) {
+  }
+  e = e << mLen | m;
+  eLen += mLen;
+  for (; eLen > 0; buffer[offset + i] = e & 255, i += d, e /= 256, eLen -= 8) {
+  }
+  buffer[offset + i - d] |= s * 128;
+}
+var toString = {}.toString;
+var isArray = Array.isArray || function(arr) {
+  return toString.call(arr) == "[object Array]";
+};
+/*!
+ * The buffer module from node.js, for the browser.
+ *
+ * @author   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
+ * @license  MIT
+ */
+var INSPECT_MAX_BYTES = 50;
+Buffer.TYPED_ARRAY_SUPPORT = global$1.TYPED_ARRAY_SUPPORT !== void 0 ? global$1.TYPED_ARRAY_SUPPORT : true;
+function kMaxLength() {
+  return Buffer.TYPED_ARRAY_SUPPORT ? 2147483647 : 1073741823;
+}
+function createBuffer(that, length) {
+  if (kMaxLength() < length) {
+    throw new RangeError("Invalid typed array length");
+  }
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    that = new Uint8Array(length);
+    that.__proto__ = Buffer.prototype;
+  } else {
+    if (that === null) {
+      that = new Buffer(length);
+    }
+    that.length = length;
+  }
+  return that;
+}
+function Buffer(arg, encodingOrOffset, length) {
+  if (!Buffer.TYPED_ARRAY_SUPPORT && !(this instanceof Buffer)) {
+    return new Buffer(arg, encodingOrOffset, length);
+  }
+  if (typeof arg === "number") {
+    if (typeof encodingOrOffset === "string") {
+      throw new Error("If encoding is specified then the first argument must be a string");
+    }
+    return allocUnsafe(this, arg);
+  }
+  return from(this, arg, encodingOrOffset, length);
+}
+Buffer.poolSize = 8192;
+Buffer._augment = function(arr) {
+  arr.__proto__ = Buffer.prototype;
+  return arr;
+};
+function from(that, value, encodingOrOffset, length) {
+  if (typeof value === "number") {
+    throw new TypeError('"value" argument must not be a number');
+  }
+  if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) {
+    return fromArrayBuffer(that, value, encodingOrOffset, length);
+  }
+  if (typeof value === "string") {
+    return fromString(that, value, encodingOrOffset);
+  }
+  return fromObject(that, value);
+}
+Buffer.from = function(value, encodingOrOffset, length) {
+  return from(null, value, encodingOrOffset, length);
+};
+if (Buffer.TYPED_ARRAY_SUPPORT) {
+  Buffer.prototype.__proto__ = Uint8Array.prototype;
+  Buffer.__proto__ = Uint8Array;
+}
+function assertSize(size) {
+  if (typeof size !== "number") {
+    throw new TypeError('"size" argument must be a number');
+  } else if (size < 0) {
+    throw new RangeError('"size" argument must not be negative');
+  }
+}
+function alloc(that, size, fill2, encoding) {
+  assertSize(size);
+  if (size <= 0) {
+    return createBuffer(that, size);
+  }
+  if (fill2 !== void 0) {
+    return typeof encoding === "string" ? createBuffer(that, size).fill(fill2, encoding) : createBuffer(that, size).fill(fill2);
+  }
+  return createBuffer(that, size);
+}
+Buffer.alloc = function(size, fill2, encoding) {
+  return alloc(null, size, fill2, encoding);
+};
+function allocUnsafe(that, size) {
+  assertSize(size);
+  that = createBuffer(that, size < 0 ? 0 : checked(size) | 0);
+  if (!Buffer.TYPED_ARRAY_SUPPORT) {
+    for (var i = 0; i < size; ++i) {
+      that[i] = 0;
     }
   }
-
-  function _createClass(Constructor, protoProps, staticProps) {
-    if (protoProps) _defineProperties(Constructor.prototype, protoProps);
-    if (staticProps) _defineProperties(Constructor, staticProps);
-    return Constructor;
+  return that;
+}
+Buffer.allocUnsafe = function(size) {
+  return allocUnsafe(null, size);
+};
+Buffer.allocUnsafeSlow = function(size) {
+  return allocUnsafe(null, size);
+};
+function fromString(that, string, encoding) {
+  if (typeof encoding !== "string" || encoding === "") {
+    encoding = "utf8";
   }
-
-  function _inherits(subClass, superClass) {
-    if (typeof superClass !== "function" && superClass !== null) {
+  if (!Buffer.isEncoding(encoding)) {
+    throw new TypeError('"encoding" must be a valid string encoding');
+  }
+  var length = byteLength(string, encoding) | 0;
+  that = createBuffer(that, length);
+  var actual = that.write(string, encoding);
+  if (actual !== length) {
+    that = that.slice(0, actual);
+  }
+  return that;
+}
+function fromArrayLike(that, array) {
+  var length = array.length < 0 ? 0 : checked(array.length) | 0;
+  that = createBuffer(that, length);
+  for (var i = 0; i < length; i += 1) {
+    that[i] = array[i] & 255;
+  }
+  return that;
+}
+function fromArrayBuffer(that, array, byteOffset, length) {
+  array.byteLength;
+  if (byteOffset < 0 || array.byteLength < byteOffset) {
+    throw new RangeError("'offset' is out of bounds");
+  }
+  if (array.byteLength < byteOffset + (length || 0)) {
+    throw new RangeError("'length' is out of bounds");
+  }
+  if (byteOffset === void 0 && length === void 0) {
+    array = new Uint8Array(array);
+  } else if (length === void 0) {
+    array = new Uint8Array(array, byteOffset);
+  } else {
+    array = new Uint8Array(array, byteOffset, length);
+  }
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    that = array;
+    that.__proto__ = Buffer.prototype;
+  } else {
+    that = fromArrayLike(that, array);
+  }
+  return that;
+}
+function fromObject(that, obj) {
+  if (internalIsBuffer(obj)) {
+    var len = checked(obj.length) | 0;
+    that = createBuffer(that, len);
+    if (that.length === 0) {
+      return that;
+    }
+    obj.copy(that, 0, 0, len);
+    return that;
+  }
+  if (obj) {
+    if (typeof ArrayBuffer !== "undefined" && obj.buffer instanceof ArrayBuffer || "length" in obj) {
+      if (typeof obj.length !== "number" || isnan(obj.length)) {
+        return createBuffer(that, 0);
+      }
+      return fromArrayLike(that, obj);
+    }
+    if (obj.type === "Buffer" && isArray(obj.data)) {
+      return fromArrayLike(that, obj.data);
+    }
+  }
+  throw new TypeError("First argument must be a string, Buffer, ArrayBuffer, Array, or array-like object.");
+}
+function checked(length) {
+  if (length >= kMaxLength()) {
+    throw new RangeError("Attempt to allocate Buffer larger than maximum size: 0x" + kMaxLength().toString(16) + " bytes");
+  }
+  return length | 0;
+}
+Buffer.isBuffer = isBuffer;
+function internalIsBuffer(b) {
+  return !!(b != null && b._isBuffer);
+}
+Buffer.compare = function compare(a, b) {
+  if (!internalIsBuffer(a) || !internalIsBuffer(b)) {
+    throw new TypeError("Arguments must be Buffers");
+  }
+  if (a === b)
+    return 0;
+  var x = a.length;
+  var y = b.length;
+  for (var i = 0, len = Math.min(x, y); i < len; ++i) {
+    if (a[i] !== b[i]) {
+      x = a[i];
+      y = b[i];
+      break;
+    }
+  }
+  if (x < y)
+    return -1;
+  if (y < x)
+    return 1;
+  return 0;
+};
+Buffer.isEncoding = function isEncoding(encoding) {
+  switch (String(encoding).toLowerCase()) {
+    case "hex":
+    case "utf8":
+    case "utf-8":
+    case "ascii":
+    case "latin1":
+    case "binary":
+    case "base64":
+    case "ucs2":
+    case "ucs-2":
+    case "utf16le":
+    case "utf-16le":
+      return true;
+    default:
+      return false;
+  }
+};
+Buffer.concat = function concat(list, length) {
+  if (!isArray(list)) {
+    throw new TypeError('"list" argument must be an Array of Buffers');
+  }
+  if (list.length === 0) {
+    return Buffer.alloc(0);
+  }
+  var i;
+  if (length === void 0) {
+    length = 0;
+    for (i = 0; i < list.length; ++i) {
+      length += list[i].length;
+    }
+  }
+  var buffer = Buffer.allocUnsafe(length);
+  var pos = 0;
+  for (i = 0; i < list.length; ++i) {
+    var buf = list[i];
+    if (!internalIsBuffer(buf)) {
+      throw new TypeError('"list" argument must be an Array of Buffers');
+    }
+    buf.copy(buffer, pos);
+    pos += buf.length;
+  }
+  return buffer;
+};
+function byteLength(string, encoding) {
+  if (internalIsBuffer(string)) {
+    return string.length;
+  }
+  if (typeof ArrayBuffer !== "undefined" && typeof ArrayBuffer.isView === "function" && (ArrayBuffer.isView(string) || string instanceof ArrayBuffer)) {
+    return string.byteLength;
+  }
+  if (typeof string !== "string") {
+    string = "" + string;
+  }
+  var len = string.length;
+  if (len === 0)
+    return 0;
+  var loweredCase = false;
+  for (; ; ) {
+    switch (encoding) {
+      case "ascii":
+      case "latin1":
+      case "binary":
+        return len;
+      case "utf8":
+      case "utf-8":
+      case void 0:
+        return utf8ToBytes(string).length;
+      case "ucs2":
+      case "ucs-2":
+      case "utf16le":
+      case "utf-16le":
+        return len * 2;
+      case "hex":
+        return len >>> 1;
+      case "base64":
+        return base64ToBytes(string).length;
+      default:
+        if (loweredCase)
+          return utf8ToBytes(string).length;
+        encoding = ("" + encoding).toLowerCase();
+        loweredCase = true;
+    }
+  }
+}
+Buffer.byteLength = byteLength;
+function slowToString(encoding, start, end) {
+  var loweredCase = false;
+  if (start === void 0 || start < 0) {
+    start = 0;
+  }
+  if (start > this.length) {
+    return "";
+  }
+  if (end === void 0 || end > this.length) {
+    end = this.length;
+  }
+  if (end <= 0) {
+    return "";
+  }
+  end >>>= 0;
+  start >>>= 0;
+  if (end <= start) {
+    return "";
+  }
+  if (!encoding)
+    encoding = "utf8";
+  while (true) {
+    switch (encoding) {
+      case "hex":
+        return hexSlice(this, start, end);
+      case "utf8":
+      case "utf-8":
+        return utf8Slice(this, start, end);
+      case "ascii":
+        return asciiSlice(this, start, end);
+      case "latin1":
+      case "binary":
+        return latin1Slice(this, start, end);
+      case "base64":
+        return base64Slice(this, start, end);
+      case "ucs2":
+      case "ucs-2":
+      case "utf16le":
+      case "utf-16le":
+        return utf16leSlice(this, start, end);
+      default:
+        if (loweredCase)
+          throw new TypeError("Unknown encoding: " + encoding);
+        encoding = (encoding + "").toLowerCase();
+        loweredCase = true;
+    }
+  }
+}
+Buffer.prototype._isBuffer = true;
+function swap(b, n, m) {
+  var i = b[n];
+  b[n] = b[m];
+  b[m] = i;
+}
+Buffer.prototype.swap16 = function swap16() {
+  var len = this.length;
+  if (len % 2 !== 0) {
+    throw new RangeError("Buffer size must be a multiple of 16-bits");
+  }
+  for (var i = 0; i < len; i += 2) {
+    swap(this, i, i + 1);
+  }
+  return this;
+};
+Buffer.prototype.swap32 = function swap32() {
+  var len = this.length;
+  if (len % 4 !== 0) {
+    throw new RangeError("Buffer size must be a multiple of 32-bits");
+  }
+  for (var i = 0; i < len; i += 4) {
+    swap(this, i, i + 3);
+    swap(this, i + 1, i + 2);
+  }
+  return this;
+};
+Buffer.prototype.swap64 = function swap64() {
+  var len = this.length;
+  if (len % 8 !== 0) {
+    throw new RangeError("Buffer size must be a multiple of 64-bits");
+  }
+  for (var i = 0; i < len; i += 8) {
+    swap(this, i, i + 7);
+    swap(this, i + 1, i + 6);
+    swap(this, i + 2, i + 5);
+    swap(this, i + 3, i + 4);
+  }
+  return this;
+};
+Buffer.prototype.toString = function toString2() {
+  var length = this.length | 0;
+  if (length === 0)
+    return "";
+  if (arguments.length === 0)
+    return utf8Slice(this, 0, length);
+  return slowToString.apply(this, arguments);
+};
+Buffer.prototype.equals = function equals(b) {
+  if (!internalIsBuffer(b))
+    throw new TypeError("Argument must be a Buffer");
+  if (this === b)
+    return true;
+  return Buffer.compare(this, b) === 0;
+};
+Buffer.prototype.inspect = function inspect() {
+  var str = "";
+  var max = INSPECT_MAX_BYTES;
+  if (this.length > 0) {
+    str = this.toString("hex", 0, max).match(/.{2}/g).join(" ");
+    if (this.length > max)
+      str += " ... ";
+  }
+  return "<Buffer " + str + ">";
+};
+Buffer.prototype.compare = function compare2(target, start, end, thisStart, thisEnd) {
+  if (!internalIsBuffer(target)) {
+    throw new TypeError("Argument must be a Buffer");
+  }
+  if (start === void 0) {
+    start = 0;
+  }
+  if (end === void 0) {
+    end = target ? target.length : 0;
+  }
+  if (thisStart === void 0) {
+    thisStart = 0;
+  }
+  if (thisEnd === void 0) {
+    thisEnd = this.length;
+  }
+  if (start < 0 || end > target.length || thisStart < 0 || thisEnd > this.length) {
+    throw new RangeError("out of range index");
+  }
+  if (thisStart >= thisEnd && start >= end) {
+    return 0;
+  }
+  if (thisStart >= thisEnd) {
+    return -1;
+  }
+  if (start >= end) {
+    return 1;
+  }
+  start >>>= 0;
+  end >>>= 0;
+  thisStart >>>= 0;
+  thisEnd >>>= 0;
+  if (this === target)
+    return 0;
+  var x = thisEnd - thisStart;
+  var y = end - start;
+  var len = Math.min(x, y);
+  var thisCopy = this.slice(thisStart, thisEnd);
+  var targetCopy = target.slice(start, end);
+  for (var i = 0; i < len; ++i) {
+    if (thisCopy[i] !== targetCopy[i]) {
+      x = thisCopy[i];
+      y = targetCopy[i];
+      break;
+    }
+  }
+  if (x < y)
+    return -1;
+  if (y < x)
+    return 1;
+  return 0;
+};
+function bidirectionalIndexOf(buffer, val, byteOffset, encoding, dir) {
+  if (buffer.length === 0)
+    return -1;
+  if (typeof byteOffset === "string") {
+    encoding = byteOffset;
+    byteOffset = 0;
+  } else if (byteOffset > 2147483647) {
+    byteOffset = 2147483647;
+  } else if (byteOffset < -2147483648) {
+    byteOffset = -2147483648;
+  }
+  byteOffset = +byteOffset;
+  if (isNaN(byteOffset)) {
+    byteOffset = dir ? 0 : buffer.length - 1;
+  }
+  if (byteOffset < 0)
+    byteOffset = buffer.length + byteOffset;
+  if (byteOffset >= buffer.length) {
+    if (dir)
+      return -1;
+    else
+      byteOffset = buffer.length - 1;
+  } else if (byteOffset < 0) {
+    if (dir)
+      byteOffset = 0;
+    else
+      return -1;
+  }
+  if (typeof val === "string") {
+    val = Buffer.from(val, encoding);
+  }
+  if (internalIsBuffer(val)) {
+    if (val.length === 0) {
+      return -1;
+    }
+    return arrayIndexOf(buffer, val, byteOffset, encoding, dir);
+  } else if (typeof val === "number") {
+    val = val & 255;
+    if (Buffer.TYPED_ARRAY_SUPPORT && typeof Uint8Array.prototype.indexOf === "function") {
+      if (dir) {
+        return Uint8Array.prototype.indexOf.call(buffer, val, byteOffset);
+      } else {
+        return Uint8Array.prototype.lastIndexOf.call(buffer, val, byteOffset);
+      }
+    }
+    return arrayIndexOf(buffer, [val], byteOffset, encoding, dir);
+  }
+  throw new TypeError("val must be string, number or Buffer");
+}
+function arrayIndexOf(arr, val, byteOffset, encoding, dir) {
+  var indexSize = 1;
+  var arrLength = arr.length;
+  var valLength = val.length;
+  if (encoding !== void 0) {
+    encoding = String(encoding).toLowerCase();
+    if (encoding === "ucs2" || encoding === "ucs-2" || encoding === "utf16le" || encoding === "utf-16le") {
+      if (arr.length < 2 || val.length < 2) {
+        return -1;
+      }
+      indexSize = 2;
+      arrLength /= 2;
+      valLength /= 2;
+      byteOffset /= 2;
+    }
+  }
+  function read2(buf, i2) {
+    if (indexSize === 1) {
+      return buf[i2];
+    } else {
+      return buf.readUInt16BE(i2 * indexSize);
+    }
+  }
+  var i;
+  if (dir) {
+    var foundIndex = -1;
+    for (i = byteOffset; i < arrLength; i++) {
+      if (read2(arr, i) === read2(val, foundIndex === -1 ? 0 : i - foundIndex)) {
+        if (foundIndex === -1)
+          foundIndex = i;
+        if (i - foundIndex + 1 === valLength)
+          return foundIndex * indexSize;
+      } else {
+        if (foundIndex !== -1)
+          i -= i - foundIndex;
+        foundIndex = -1;
+      }
+    }
+  } else {
+    if (byteOffset + valLength > arrLength)
+      byteOffset = arrLength - valLength;
+    for (i = byteOffset; i >= 0; i--) {
+      var found = true;
+      for (var j = 0; j < valLength; j++) {
+        if (read2(arr, i + j) !== read2(val, j)) {
+          found = false;
+          break;
+        }
+      }
+      if (found)
+        return i;
+    }
+  }
+  return -1;
+}
+Buffer.prototype.includes = function includes(val, byteOffset, encoding) {
+  return this.indexOf(val, byteOffset, encoding) !== -1;
+};
+Buffer.prototype.indexOf = function indexOf(val, byteOffset, encoding) {
+  return bidirectionalIndexOf(this, val, byteOffset, encoding, true);
+};
+Buffer.prototype.lastIndexOf = function lastIndexOf(val, byteOffset, encoding) {
+  return bidirectionalIndexOf(this, val, byteOffset, encoding, false);
+};
+function hexWrite(buf, string, offset, length) {
+  offset = Number(offset) || 0;
+  var remaining = buf.length - offset;
+  if (!length) {
+    length = remaining;
+  } else {
+    length = Number(length);
+    if (length > remaining) {
+      length = remaining;
+    }
+  }
+  var strLen = string.length;
+  if (strLen % 2 !== 0)
+    throw new TypeError("Invalid hex string");
+  if (length > strLen / 2) {
+    length = strLen / 2;
+  }
+  for (var i = 0; i < length; ++i) {
+    var parsed = parseInt(string.substr(i * 2, 2), 16);
+    if (isNaN(parsed))
+      return i;
+    buf[offset + i] = parsed;
+  }
+  return i;
+}
+function utf8Write(buf, string, offset, length) {
+  return blitBuffer(utf8ToBytes(string, buf.length - offset), buf, offset, length);
+}
+function asciiWrite(buf, string, offset, length) {
+  return blitBuffer(asciiToBytes(string), buf, offset, length);
+}
+function latin1Write(buf, string, offset, length) {
+  return asciiWrite(buf, string, offset, length);
+}
+function base64Write(buf, string, offset, length) {
+  return blitBuffer(base64ToBytes(string), buf, offset, length);
+}
+function ucs2Write(buf, string, offset, length) {
+  return blitBuffer(utf16leToBytes(string, buf.length - offset), buf, offset, length);
+}
+Buffer.prototype.write = function write2(string, offset, length, encoding) {
+  if (offset === void 0) {
+    encoding = "utf8";
+    length = this.length;
+    offset = 0;
+  } else if (length === void 0 && typeof offset === "string") {
+    encoding = offset;
+    length = this.length;
+    offset = 0;
+  } else if (isFinite(offset)) {
+    offset = offset | 0;
+    if (isFinite(length)) {
+      length = length | 0;
+      if (encoding === void 0)
+        encoding = "utf8";
+    } else {
+      encoding = length;
+      length = void 0;
+    }
+  } else {
+    throw new Error("Buffer.write(string, encoding, offset[, length]) is no longer supported");
+  }
+  var remaining = this.length - offset;
+  if (length === void 0 || length > remaining)
+    length = remaining;
+  if (string.length > 0 && (length < 0 || offset < 0) || offset > this.length) {
+    throw new RangeError("Attempt to write outside buffer bounds");
+  }
+  if (!encoding)
+    encoding = "utf8";
+  var loweredCase = false;
+  for (; ; ) {
+    switch (encoding) {
+      case "hex":
+        return hexWrite(this, string, offset, length);
+      case "utf8":
+      case "utf-8":
+        return utf8Write(this, string, offset, length);
+      case "ascii":
+        return asciiWrite(this, string, offset, length);
+      case "latin1":
+      case "binary":
+        return latin1Write(this, string, offset, length);
+      case "base64":
+        return base64Write(this, string, offset, length);
+      case "ucs2":
+      case "ucs-2":
+      case "utf16le":
+      case "utf-16le":
+        return ucs2Write(this, string, offset, length);
+      default:
+        if (loweredCase)
+          throw new TypeError("Unknown encoding: " + encoding);
+        encoding = ("" + encoding).toLowerCase();
+        loweredCase = true;
+    }
+  }
+};
+Buffer.prototype.toJSON = function toJSON() {
+  return {
+    type: "Buffer",
+    data: Array.prototype.slice.call(this._arr || this, 0)
+  };
+};
+function base64Slice(buf, start, end) {
+  if (start === 0 && end === buf.length) {
+    return fromByteArray(buf);
+  } else {
+    return fromByteArray(buf.slice(start, end));
+  }
+}
+function utf8Slice(buf, start, end) {
+  end = Math.min(buf.length, end);
+  var res = [];
+  var i = start;
+  while (i < end) {
+    var firstByte = buf[i];
+    var codePoint = null;
+    var bytesPerSequence = firstByte > 239 ? 4 : firstByte > 223 ? 3 : firstByte > 191 ? 2 : 1;
+    if (i + bytesPerSequence <= end) {
+      var secondByte, thirdByte, fourthByte, tempCodePoint;
+      switch (bytesPerSequence) {
+        case 1:
+          if (firstByte < 128) {
+            codePoint = firstByte;
+          }
+          break;
+        case 2:
+          secondByte = buf[i + 1];
+          if ((secondByte & 192) === 128) {
+            tempCodePoint = (firstByte & 31) << 6 | secondByte & 63;
+            if (tempCodePoint > 127) {
+              codePoint = tempCodePoint;
+            }
+          }
+          break;
+        case 3:
+          secondByte = buf[i + 1];
+          thirdByte = buf[i + 2];
+          if ((secondByte & 192) === 128 && (thirdByte & 192) === 128) {
+            tempCodePoint = (firstByte & 15) << 12 | (secondByte & 63) << 6 | thirdByte & 63;
+            if (tempCodePoint > 2047 && (tempCodePoint < 55296 || tempCodePoint > 57343)) {
+              codePoint = tempCodePoint;
+            }
+          }
+          break;
+        case 4:
+          secondByte = buf[i + 1];
+          thirdByte = buf[i + 2];
+          fourthByte = buf[i + 3];
+          if ((secondByte & 192) === 128 && (thirdByte & 192) === 128 && (fourthByte & 192) === 128) {
+            tempCodePoint = (firstByte & 15) << 18 | (secondByte & 63) << 12 | (thirdByte & 63) << 6 | fourthByte & 63;
+            if (tempCodePoint > 65535 && tempCodePoint < 1114112) {
+              codePoint = tempCodePoint;
+            }
+          }
+      }
+    }
+    if (codePoint === null) {
+      codePoint = 65533;
+      bytesPerSequence = 1;
+    } else if (codePoint > 65535) {
+      codePoint -= 65536;
+      res.push(codePoint >>> 10 & 1023 | 55296);
+      codePoint = 56320 | codePoint & 1023;
+    }
+    res.push(codePoint);
+    i += bytesPerSequence;
+  }
+  return decodeCodePointsArray(res);
+}
+var MAX_ARGUMENTS_LENGTH = 4096;
+function decodeCodePointsArray(codePoints) {
+  var len = codePoints.length;
+  if (len <= MAX_ARGUMENTS_LENGTH) {
+    return String.fromCharCode.apply(String, codePoints);
+  }
+  var res = "";
+  var i = 0;
+  while (i < len) {
+    res += String.fromCharCode.apply(String, codePoints.slice(i, i += MAX_ARGUMENTS_LENGTH));
+  }
+  return res;
+}
+function asciiSlice(buf, start, end) {
+  var ret = "";
+  end = Math.min(buf.length, end);
+  for (var i = start; i < end; ++i) {
+    ret += String.fromCharCode(buf[i] & 127);
+  }
+  return ret;
+}
+function latin1Slice(buf, start, end) {
+  var ret = "";
+  end = Math.min(buf.length, end);
+  for (var i = start; i < end; ++i) {
+    ret += String.fromCharCode(buf[i]);
+  }
+  return ret;
+}
+function hexSlice(buf, start, end) {
+  var len = buf.length;
+  if (!start || start < 0)
+    start = 0;
+  if (!end || end < 0 || end > len)
+    end = len;
+  var out = "";
+  for (var i = start; i < end; ++i) {
+    out += toHex(buf[i]);
+  }
+  return out;
+}
+function utf16leSlice(buf, start, end) {
+  var bytes = buf.slice(start, end);
+  var res = "";
+  for (var i = 0; i < bytes.length; i += 2) {
+    res += String.fromCharCode(bytes[i] + bytes[i + 1] * 256);
+  }
+  return res;
+}
+Buffer.prototype.slice = function slice(start, end) {
+  var len = this.length;
+  start = ~~start;
+  end = end === void 0 ? len : ~~end;
+  if (start < 0) {
+    start += len;
+    if (start < 0)
+      start = 0;
+  } else if (start > len) {
+    start = len;
+  }
+  if (end < 0) {
+    end += len;
+    if (end < 0)
+      end = 0;
+  } else if (end > len) {
+    end = len;
+  }
+  if (end < start)
+    end = start;
+  var newBuf;
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    newBuf = this.subarray(start, end);
+    newBuf.__proto__ = Buffer.prototype;
+  } else {
+    var sliceLen = end - start;
+    newBuf = new Buffer(sliceLen, void 0);
+    for (var i = 0; i < sliceLen; ++i) {
+      newBuf[i] = this[i + start];
+    }
+  }
+  return newBuf;
+};
+function checkOffset(offset, ext, length) {
+  if (offset % 1 !== 0 || offset < 0)
+    throw new RangeError("offset is not uint");
+  if (offset + ext > length)
+    throw new RangeError("Trying to access beyond buffer length");
+}
+Buffer.prototype.readUIntLE = function readUIntLE(offset, byteLength2, noAssert) {
+  offset = offset | 0;
+  byteLength2 = byteLength2 | 0;
+  if (!noAssert)
+    checkOffset(offset, byteLength2, this.length);
+  var val = this[offset];
+  var mul = 1;
+  var i = 0;
+  while (++i < byteLength2 && (mul *= 256)) {
+    val += this[offset + i] * mul;
+  }
+  return val;
+};
+Buffer.prototype.readUIntBE = function readUIntBE(offset, byteLength2, noAssert) {
+  offset = offset | 0;
+  byteLength2 = byteLength2 | 0;
+  if (!noAssert) {
+    checkOffset(offset, byteLength2, this.length);
+  }
+  var val = this[offset + --byteLength2];
+  var mul = 1;
+  while (byteLength2 > 0 && (mul *= 256)) {
+    val += this[offset + --byteLength2] * mul;
+  }
+  return val;
+};
+Buffer.prototype.readUInt8 = function readUInt8(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 1, this.length);
+  return this[offset];
+};
+Buffer.prototype.readUInt16LE = function readUInt16LE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 2, this.length);
+  return this[offset] | this[offset + 1] << 8;
+};
+Buffer.prototype.readUInt16BE = function readUInt16BE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 2, this.length);
+  return this[offset] << 8 | this[offset + 1];
+};
+Buffer.prototype.readUInt32LE = function readUInt32LE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length);
+  return (this[offset] | this[offset + 1] << 8 | this[offset + 2] << 16) + this[offset + 3] * 16777216;
+};
+Buffer.prototype.readUInt32BE = function readUInt32BE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length);
+  return this[offset] * 16777216 + (this[offset + 1] << 16 | this[offset + 2] << 8 | this[offset + 3]);
+};
+Buffer.prototype.readIntLE = function readIntLE(offset, byteLength2, noAssert) {
+  offset = offset | 0;
+  byteLength2 = byteLength2 | 0;
+  if (!noAssert)
+    checkOffset(offset, byteLength2, this.length);
+  var val = this[offset];
+  var mul = 1;
+  var i = 0;
+  while (++i < byteLength2 && (mul *= 256)) {
+    val += this[offset + i] * mul;
+  }
+  mul *= 128;
+  if (val >= mul)
+    val -= Math.pow(2, 8 * byteLength2);
+  return val;
+};
+Buffer.prototype.readIntBE = function readIntBE(offset, byteLength2, noAssert) {
+  offset = offset | 0;
+  byteLength2 = byteLength2 | 0;
+  if (!noAssert)
+    checkOffset(offset, byteLength2, this.length);
+  var i = byteLength2;
+  var mul = 1;
+  var val = this[offset + --i];
+  while (i > 0 && (mul *= 256)) {
+    val += this[offset + --i] * mul;
+  }
+  mul *= 128;
+  if (val >= mul)
+    val -= Math.pow(2, 8 * byteLength2);
+  return val;
+};
+Buffer.prototype.readInt8 = function readInt8(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 1, this.length);
+  if (!(this[offset] & 128))
+    return this[offset];
+  return (255 - this[offset] + 1) * -1;
+};
+Buffer.prototype.readInt16LE = function readInt16LE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 2, this.length);
+  var val = this[offset] | this[offset + 1] << 8;
+  return val & 32768 ? val | 4294901760 : val;
+};
+Buffer.prototype.readInt16BE = function readInt16BE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 2, this.length);
+  var val = this[offset + 1] | this[offset] << 8;
+  return val & 32768 ? val | 4294901760 : val;
+};
+Buffer.prototype.readInt32LE = function readInt32LE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length);
+  return this[offset] | this[offset + 1] << 8 | this[offset + 2] << 16 | this[offset + 3] << 24;
+};
+Buffer.prototype.readInt32BE = function readInt32BE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length);
+  return this[offset] << 24 | this[offset + 1] << 16 | this[offset + 2] << 8 | this[offset + 3];
+};
+Buffer.prototype.readFloatLE = function readFloatLE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length);
+  return read(this, offset, true, 23, 4);
+};
+Buffer.prototype.readFloatBE = function readFloatBE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length);
+  return read(this, offset, false, 23, 4);
+};
+Buffer.prototype.readDoubleLE = function readDoubleLE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 8, this.length);
+  return read(this, offset, true, 52, 8);
+};
+Buffer.prototype.readDoubleBE = function readDoubleBE(offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 8, this.length);
+  return read(this, offset, false, 52, 8);
+};
+function checkInt(buf, value, offset, ext, max, min) {
+  if (!internalIsBuffer(buf))
+    throw new TypeError('"buffer" argument must be a Buffer instance');
+  if (value > max || value < min)
+    throw new RangeError('"value" argument is out of bounds');
+  if (offset + ext > buf.length)
+    throw new RangeError("Index out of range");
+}
+Buffer.prototype.writeUIntLE = function writeUIntLE(value, offset, byteLength2, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  byteLength2 = byteLength2 | 0;
+  if (!noAssert) {
+    var maxBytes = Math.pow(2, 8 * byteLength2) - 1;
+    checkInt(this, value, offset, byteLength2, maxBytes, 0);
+  }
+  var mul = 1;
+  var i = 0;
+  this[offset] = value & 255;
+  while (++i < byteLength2 && (mul *= 256)) {
+    this[offset + i] = value / mul & 255;
+  }
+  return offset + byteLength2;
+};
+Buffer.prototype.writeUIntBE = function writeUIntBE(value, offset, byteLength2, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  byteLength2 = byteLength2 | 0;
+  if (!noAssert) {
+    var maxBytes = Math.pow(2, 8 * byteLength2) - 1;
+    checkInt(this, value, offset, byteLength2, maxBytes, 0);
+  }
+  var i = byteLength2 - 1;
+  var mul = 1;
+  this[offset + i] = value & 255;
+  while (--i >= 0 && (mul *= 256)) {
+    this[offset + i] = value / mul & 255;
+  }
+  return offset + byteLength2;
+};
+Buffer.prototype.writeUInt8 = function writeUInt8(value, offset, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert)
+    checkInt(this, value, offset, 1, 255, 0);
+  if (!Buffer.TYPED_ARRAY_SUPPORT)
+    value = Math.floor(value);
+  this[offset] = value & 255;
+  return offset + 1;
+};
+function objectWriteUInt16(buf, value, offset, littleEndian) {
+  if (value < 0)
+    value = 65535 + value + 1;
+  for (var i = 0, j = Math.min(buf.length - offset, 2); i < j; ++i) {
+    buf[offset + i] = (value & 255 << 8 * (littleEndian ? i : 1 - i)) >>> (littleEndian ? i : 1 - i) * 8;
+  }
+}
+Buffer.prototype.writeUInt16LE = function writeUInt16LE(value, offset, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert)
+    checkInt(this, value, offset, 2, 65535, 0);
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = value & 255;
+    this[offset + 1] = value >>> 8;
+  } else {
+    objectWriteUInt16(this, value, offset, true);
+  }
+  return offset + 2;
+};
+Buffer.prototype.writeUInt16BE = function writeUInt16BE(value, offset, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert)
+    checkInt(this, value, offset, 2, 65535, 0);
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = value >>> 8;
+    this[offset + 1] = value & 255;
+  } else {
+    objectWriteUInt16(this, value, offset, false);
+  }
+  return offset + 2;
+};
+function objectWriteUInt32(buf, value, offset, littleEndian) {
+  if (value < 0)
+    value = 4294967295 + value + 1;
+  for (var i = 0, j = Math.min(buf.length - offset, 4); i < j; ++i) {
+    buf[offset + i] = value >>> (littleEndian ? i : 3 - i) * 8 & 255;
+  }
+}
+Buffer.prototype.writeUInt32LE = function writeUInt32LE(value, offset, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert)
+    checkInt(this, value, offset, 4, 4294967295, 0);
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset + 3] = value >>> 24;
+    this[offset + 2] = value >>> 16;
+    this[offset + 1] = value >>> 8;
+    this[offset] = value & 255;
+  } else {
+    objectWriteUInt32(this, value, offset, true);
+  }
+  return offset + 4;
+};
+Buffer.prototype.writeUInt32BE = function writeUInt32BE(value, offset, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert)
+    checkInt(this, value, offset, 4, 4294967295, 0);
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = value >>> 24;
+    this[offset + 1] = value >>> 16;
+    this[offset + 2] = value >>> 8;
+    this[offset + 3] = value & 255;
+  } else {
+    objectWriteUInt32(this, value, offset, false);
+  }
+  return offset + 4;
+};
+Buffer.prototype.writeIntLE = function writeIntLE(value, offset, byteLength2, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert) {
+    var limit = Math.pow(2, 8 * byteLength2 - 1);
+    checkInt(this, value, offset, byteLength2, limit - 1, -limit);
+  }
+  var i = 0;
+  var mul = 1;
+  var sub = 0;
+  this[offset] = value & 255;
+  while (++i < byteLength2 && (mul *= 256)) {
+    if (value < 0 && sub === 0 && this[offset + i - 1] !== 0) {
+      sub = 1;
+    }
+    this[offset + i] = (value / mul >> 0) - sub & 255;
+  }
+  return offset + byteLength2;
+};
+Buffer.prototype.writeIntBE = function writeIntBE(value, offset, byteLength2, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert) {
+    var limit = Math.pow(2, 8 * byteLength2 - 1);
+    checkInt(this, value, offset, byteLength2, limit - 1, -limit);
+  }
+  var i = byteLength2 - 1;
+  var mul = 1;
+  var sub = 0;
+  this[offset + i] = value & 255;
+  while (--i >= 0 && (mul *= 256)) {
+    if (value < 0 && sub === 0 && this[offset + i + 1] !== 0) {
+      sub = 1;
+    }
+    this[offset + i] = (value / mul >> 0) - sub & 255;
+  }
+  return offset + byteLength2;
+};
+Buffer.prototype.writeInt8 = function writeInt8(value, offset, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert)
+    checkInt(this, value, offset, 1, 127, -128);
+  if (!Buffer.TYPED_ARRAY_SUPPORT)
+    value = Math.floor(value);
+  if (value < 0)
+    value = 255 + value + 1;
+  this[offset] = value & 255;
+  return offset + 1;
+};
+Buffer.prototype.writeInt16LE = function writeInt16LE(value, offset, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert)
+    checkInt(this, value, offset, 2, 32767, -32768);
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = value & 255;
+    this[offset + 1] = value >>> 8;
+  } else {
+    objectWriteUInt16(this, value, offset, true);
+  }
+  return offset + 2;
+};
+Buffer.prototype.writeInt16BE = function writeInt16BE(value, offset, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert)
+    checkInt(this, value, offset, 2, 32767, -32768);
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = value >>> 8;
+    this[offset + 1] = value & 255;
+  } else {
+    objectWriteUInt16(this, value, offset, false);
+  }
+  return offset + 2;
+};
+Buffer.prototype.writeInt32LE = function writeInt32LE(value, offset, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert)
+    checkInt(this, value, offset, 4, 2147483647, -2147483648);
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = value & 255;
+    this[offset + 1] = value >>> 8;
+    this[offset + 2] = value >>> 16;
+    this[offset + 3] = value >>> 24;
+  } else {
+    objectWriteUInt32(this, value, offset, true);
+  }
+  return offset + 4;
+};
+Buffer.prototype.writeInt32BE = function writeInt32BE(value, offset, noAssert) {
+  value = +value;
+  offset = offset | 0;
+  if (!noAssert)
+    checkInt(this, value, offset, 4, 2147483647, -2147483648);
+  if (value < 0)
+    value = 4294967295 + value + 1;
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = value >>> 24;
+    this[offset + 1] = value >>> 16;
+    this[offset + 2] = value >>> 8;
+    this[offset + 3] = value & 255;
+  } else {
+    objectWriteUInt32(this, value, offset, false);
+  }
+  return offset + 4;
+};
+function checkIEEE754(buf, value, offset, ext, max, min) {
+  if (offset + ext > buf.length)
+    throw new RangeError("Index out of range");
+  if (offset < 0)
+    throw new RangeError("Index out of range");
+}
+function writeFloat(buf, value, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    checkIEEE754(buf, value, offset, 4);
+  }
+  write(buf, value, offset, littleEndian, 23, 4);
+  return offset + 4;
+}
+Buffer.prototype.writeFloatLE = function writeFloatLE(value, offset, noAssert) {
+  return writeFloat(this, value, offset, true, noAssert);
+};
+Buffer.prototype.writeFloatBE = function writeFloatBE(value, offset, noAssert) {
+  return writeFloat(this, value, offset, false, noAssert);
+};
+function writeDouble(buf, value, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    checkIEEE754(buf, value, offset, 8);
+  }
+  write(buf, value, offset, littleEndian, 52, 8);
+  return offset + 8;
+}
+Buffer.prototype.writeDoubleLE = function writeDoubleLE(value, offset, noAssert) {
+  return writeDouble(this, value, offset, true, noAssert);
+};
+Buffer.prototype.writeDoubleBE = function writeDoubleBE(value, offset, noAssert) {
+  return writeDouble(this, value, offset, false, noAssert);
+};
+Buffer.prototype.copy = function copy(target, targetStart, start, end) {
+  if (!start)
+    start = 0;
+  if (!end && end !== 0)
+    end = this.length;
+  if (targetStart >= target.length)
+    targetStart = target.length;
+  if (!targetStart)
+    targetStart = 0;
+  if (end > 0 && end < start)
+    end = start;
+  if (end === start)
+    return 0;
+  if (target.length === 0 || this.length === 0)
+    return 0;
+  if (targetStart < 0) {
+    throw new RangeError("targetStart out of bounds");
+  }
+  if (start < 0 || start >= this.length)
+    throw new RangeError("sourceStart out of bounds");
+  if (end < 0)
+    throw new RangeError("sourceEnd out of bounds");
+  if (end > this.length)
+    end = this.length;
+  if (target.length - targetStart < end - start) {
+    end = target.length - targetStart + start;
+  }
+  var len = end - start;
+  var i;
+  if (this === target && start < targetStart && targetStart < end) {
+    for (i = len - 1; i >= 0; --i) {
+      target[i + targetStart] = this[i + start];
+    }
+  } else if (len < 1e3 || !Buffer.TYPED_ARRAY_SUPPORT) {
+    for (i = 0; i < len; ++i) {
+      target[i + targetStart] = this[i + start];
+    }
+  } else {
+    Uint8Array.prototype.set.call(target, this.subarray(start, start + len), targetStart);
+  }
+  return len;
+};
+Buffer.prototype.fill = function fill(val, start, end, encoding) {
+  if (typeof val === "string") {
+    if (typeof start === "string") {
+      encoding = start;
+      start = 0;
+      end = this.length;
+    } else if (typeof end === "string") {
+      encoding = end;
+      end = this.length;
+    }
+    if (val.length === 1) {
+      var code = val.charCodeAt(0);
+      if (code < 256) {
+        val = code;
+      }
+    }
+    if (encoding !== void 0 && typeof encoding !== "string") {
+      throw new TypeError("encoding must be a string");
+    }
+    if (typeof encoding === "string" && !Buffer.isEncoding(encoding)) {
+      throw new TypeError("Unknown encoding: " + encoding);
+    }
+  } else if (typeof val === "number") {
+    val = val & 255;
+  }
+  if (start < 0 || this.length < start || this.length < end) {
+    throw new RangeError("Out of range index");
+  }
+  if (end <= start) {
+    return this;
+  }
+  start = start >>> 0;
+  end = end === void 0 ? this.length : end >>> 0;
+  if (!val)
+    val = 0;
+  var i;
+  if (typeof val === "number") {
+    for (i = start; i < end; ++i) {
+      this[i] = val;
+    }
+  } else {
+    var bytes = internalIsBuffer(val) ? val : utf8ToBytes(new Buffer(val, encoding).toString());
+    var len = bytes.length;
+    for (i = 0; i < end - start; ++i) {
+      this[i + start] = bytes[i % len];
+    }
+  }
+  return this;
+};
+var INVALID_BASE64_RE = /[^+\/0-9A-Za-z-_]/g;
+function base64clean(str) {
+  str = stringtrim(str).replace(INVALID_BASE64_RE, "");
+  if (str.length < 2)
+    return "";
+  while (str.length % 4 !== 0) {
+    str = str + "=";
+  }
+  return str;
+}
+function stringtrim(str) {
+  if (str.trim)
+    return str.trim();
+  return str.replace(/^\s+|\s+$/g, "");
+}
+function toHex(n) {
+  if (n < 16)
+    return "0" + n.toString(16);
+  return n.toString(16);
+}
+function utf8ToBytes(string, units) {
+  units = units || Infinity;
+  var codePoint;
+  var length = string.length;
+  var leadSurrogate = null;
+  var bytes = [];
+  for (var i = 0; i < length; ++i) {
+    codePoint = string.charCodeAt(i);
+    if (codePoint > 55295 && codePoint < 57344) {
+      if (!leadSurrogate) {
+        if (codePoint > 56319) {
+          if ((units -= 3) > -1)
+            bytes.push(239, 191, 189);
+          continue;
+        } else if (i + 1 === length) {
+          if ((units -= 3) > -1)
+            bytes.push(239, 191, 189);
+          continue;
+        }
+        leadSurrogate = codePoint;
+        continue;
+      }
+      if (codePoint < 56320) {
+        if ((units -= 3) > -1)
+          bytes.push(239, 191, 189);
+        leadSurrogate = codePoint;
+        continue;
+      }
+      codePoint = (leadSurrogate - 55296 << 10 | codePoint - 56320) + 65536;
+    } else if (leadSurrogate) {
+      if ((units -= 3) > -1)
+        bytes.push(239, 191, 189);
+    }
+    leadSurrogate = null;
+    if (codePoint < 128) {
+      if ((units -= 1) < 0)
+        break;
+      bytes.push(codePoint);
+    } else if (codePoint < 2048) {
+      if ((units -= 2) < 0)
+        break;
+      bytes.push(codePoint >> 6 | 192, codePoint & 63 | 128);
+    } else if (codePoint < 65536) {
+      if ((units -= 3) < 0)
+        break;
+      bytes.push(codePoint >> 12 | 224, codePoint >> 6 & 63 | 128, codePoint & 63 | 128);
+    } else if (codePoint < 1114112) {
+      if ((units -= 4) < 0)
+        break;
+      bytes.push(codePoint >> 18 | 240, codePoint >> 12 & 63 | 128, codePoint >> 6 & 63 | 128, codePoint & 63 | 128);
+    } else {
+      throw new Error("Invalid code point");
+    }
+  }
+  return bytes;
+}
+function asciiToBytes(str) {
+  var byteArray = [];
+  for (var i = 0; i < str.length; ++i) {
+    byteArray.push(str.charCodeAt(i) & 255);
+  }
+  return byteArray;
+}
+function utf16leToBytes(str, units) {
+  var c, hi, lo;
+  var byteArray = [];
+  for (var i = 0; i < str.length; ++i) {
+    if ((units -= 2) < 0)
+      break;
+    c = str.charCodeAt(i);
+    hi = c >> 8;
+    lo = c % 256;
+    byteArray.push(lo);
+    byteArray.push(hi);
+  }
+  return byteArray;
+}
+function base64ToBytes(str) {
+  return toByteArray(base64clean(str));
+}
+function blitBuffer(src, dst, offset, length) {
+  for (var i = 0; i < length; ++i) {
+    if (i + offset >= dst.length || i >= src.length)
+      break;
+    dst[i + offset] = src[i];
+  }
+  return i;
+}
+function isnan(val) {
+  return val !== val;
+}
+function isBuffer(obj) {
+  return obj != null && (!!obj._isBuffer || isFastBuffer(obj) || isSlowBuffer(obj));
+}
+function isFastBuffer(obj) {
+  return !!obj.constructor && typeof obj.constructor.isBuffer === "function" && obj.constructor.isBuffer(obj);
+}
+function isSlowBuffer(obj) {
+  return typeof obj.readFloatLE === "function" && typeof obj.slice === "function" && isFastBuffer(obj.slice(0, 0));
+}
+var RPC = "rpc";
+var UPLOAD = "upload";
+var DOWNLOAD = "download";
+var APP_AUTH = "app";
+var USER_AUTH = "user";
+var TEAM_AUTH = "team";
+var NO_AUTH = "noauth";
+var DEFAULT_API_DOMAIN = "dropboxapi.com";
+var DEFAULT_DOMAIN = "dropbox.com";
+var TEST_DOMAIN_MAPPINGS = {
+  api: "api",
+  notify: "bolt",
+  content: "api-content"
+};
+var routes = {};
+routes.accountSetProfilePhoto = function(arg) {
+  return this.request("account/set_profile_photo", arg, "user", "api", "rpc");
+};
+routes.authTokenFromOauth1 = function(arg) {
+  return this.request("auth/token/from_oauth1", arg, "app", "api", "rpc");
+};
+routes.authTokenRevoke = function() {
+  return this.request("auth/token/revoke", null, "user", "api", "rpc");
+};
+routes.checkApp = function(arg) {
+  return this.request("check/app", arg, "app", "api", "rpc");
+};
+routes.checkUser = function(arg) {
+  return this.request("check/user", arg, "user", "api", "rpc");
+};
+routes.contactsDeleteManualContacts = function() {
+  return this.request("contacts/delete_manual_contacts", null, "user", "api", "rpc");
+};
+routes.contactsDeleteManualContactsBatch = function(arg) {
+  return this.request("contacts/delete_manual_contacts_batch", arg, "user", "api", "rpc");
+};
+routes.filePropertiesPropertiesAdd = function(arg) {
+  return this.request("file_properties/properties/add", arg, "user", "api", "rpc");
+};
+routes.filePropertiesPropertiesOverwrite = function(arg) {
+  return this.request("file_properties/properties/overwrite", arg, "user", "api", "rpc");
+};
+routes.filePropertiesPropertiesRemove = function(arg) {
+  return this.request("file_properties/properties/remove", arg, "user", "api", "rpc");
+};
+routes.filePropertiesPropertiesSearch = function(arg) {
+  return this.request("file_properties/properties/search", arg, "user", "api", "rpc");
+};
+routes.filePropertiesPropertiesSearchContinue = function(arg) {
+  return this.request("file_properties/properties/search/continue", arg, "user", "api", "rpc");
+};
+routes.filePropertiesPropertiesUpdate = function(arg) {
+  return this.request("file_properties/properties/update", arg, "user", "api", "rpc");
+};
+routes.filePropertiesTemplatesAddForTeam = function(arg) {
+  return this.request("file_properties/templates/add_for_team", arg, "team", "api", "rpc");
+};
+routes.filePropertiesTemplatesAddForUser = function(arg) {
+  return this.request("file_properties/templates/add_for_user", arg, "user", "api", "rpc");
+};
+routes.filePropertiesTemplatesGetForTeam = function(arg) {
+  return this.request("file_properties/templates/get_for_team", arg, "team", "api", "rpc");
+};
+routes.filePropertiesTemplatesGetForUser = function(arg) {
+  return this.request("file_properties/templates/get_for_user", arg, "user", "api", "rpc");
+};
+routes.filePropertiesTemplatesListForTeam = function() {
+  return this.request("file_properties/templates/list_for_team", null, "team", "api", "rpc");
+};
+routes.filePropertiesTemplatesListForUser = function() {
+  return this.request("file_properties/templates/list_for_user", null, "user", "api", "rpc");
+};
+routes.filePropertiesTemplatesRemoveForTeam = function(arg) {
+  return this.request("file_properties/templates/remove_for_team", arg, "team", "api", "rpc");
+};
+routes.filePropertiesTemplatesRemoveForUser = function(arg) {
+  return this.request("file_properties/templates/remove_for_user", arg, "user", "api", "rpc");
+};
+routes.filePropertiesTemplatesUpdateForTeam = function(arg) {
+  return this.request("file_properties/templates/update_for_team", arg, "team", "api", "rpc");
+};
+routes.filePropertiesTemplatesUpdateForUser = function(arg) {
+  return this.request("file_properties/templates/update_for_user", arg, "user", "api", "rpc");
+};
+routes.fileRequestsCount = function() {
+  return this.request("file_requests/count", null, "user", "api", "rpc");
+};
+routes.fileRequestsCreate = function(arg) {
+  return this.request("file_requests/create", arg, "user", "api", "rpc");
+};
+routes.fileRequestsDelete = function(arg) {
+  return this.request("file_requests/delete", arg, "user", "api", "rpc");
+};
+routes.fileRequestsDeleteAllClosed = function() {
+  return this.request("file_requests/delete_all_closed", null, "user", "api", "rpc");
+};
+routes.fileRequestsGet = function(arg) {
+  return this.request("file_requests/get", arg, "user", "api", "rpc");
+};
+routes.fileRequestsListV2 = function(arg) {
+  return this.request("file_requests/list_v2", arg, "user", "api", "rpc");
+};
+routes.fileRequestsList = function() {
+  return this.request("file_requests/list", null, "user", "api", "rpc");
+};
+routes.fileRequestsListContinue = function(arg) {
+  return this.request("file_requests/list/continue", arg, "user", "api", "rpc");
+};
+routes.fileRequestsUpdate = function(arg) {
+  return this.request("file_requests/update", arg, "user", "api", "rpc");
+};
+routes.filesAlphaGetMetadata = function(arg) {
+  return this.request("files/alpha/get_metadata", arg, "user", "api", "rpc");
+};
+routes.filesAlphaUpload = function(arg) {
+  return this.request("files/alpha/upload", arg, "user", "content", "upload");
+};
+routes.filesCopyV2 = function(arg) {
+  return this.request("files/copy_v2", arg, "user", "api", "rpc");
+};
+routes.filesCopy = function(arg) {
+  return this.request("files/copy", arg, "user", "api", "rpc");
+};
+routes.filesCopyBatchV2 = function(arg) {
+  return this.request("files/copy_batch_v2", arg, "user", "api", "rpc");
+};
+routes.filesCopyBatch = function(arg) {
+  return this.request("files/copy_batch", arg, "user", "api", "rpc");
+};
+routes.filesCopyBatchCheckV2 = function(arg) {
+  return this.request("files/copy_batch/check_v2", arg, "user", "api", "rpc");
+};
+routes.filesCopyBatchCheck = function(arg) {
+  return this.request("files/copy_batch/check", arg, "user", "api", "rpc");
+};
+routes.filesCopyReferenceGet = function(arg) {
+  return this.request("files/copy_reference/get", arg, "user", "api", "rpc");
+};
+routes.filesCopyReferenceSave = function(arg) {
+  return this.request("files/copy_reference/save", arg, "user", "api", "rpc");
+};
+routes.filesCreateFolderV2 = function(arg) {
+  return this.request("files/create_folder_v2", arg, "user", "api", "rpc");
+};
+routes.filesCreateFolder = function(arg) {
+  return this.request("files/create_folder", arg, "user", "api", "rpc");
+};
+routes.filesCreateFolderBatch = function(arg) {
+  return this.request("files/create_folder_batch", arg, "user", "api", "rpc");
+};
+routes.filesCreateFolderBatchCheck = function(arg) {
+  return this.request("files/create_folder_batch/check", arg, "user", "api", "rpc");
+};
+routes.filesDeleteV2 = function(arg) {
+  return this.request("files/delete_v2", arg, "user", "api", "rpc");
+};
+routes.filesDelete = function(arg) {
+  return this.request("files/delete", arg, "user", "api", "rpc");
+};
+routes.filesDeleteBatch = function(arg) {
+  return this.request("files/delete_batch", arg, "user", "api", "rpc");
+};
+routes.filesDeleteBatchCheck = function(arg) {
+  return this.request("files/delete_batch/check", arg, "user", "api", "rpc");
+};
+routes.filesDownload = function(arg) {
+  return this.request("files/download", arg, "user", "content", "download");
+};
+routes.filesDownloadZip = function(arg) {
+  return this.request("files/download_zip", arg, "user", "content", "download");
+};
+routes.filesExport = function(arg) {
+  return this.request("files/export", arg, "user", "content", "download");
+};
+routes.filesGetFileLockBatch = function(arg) {
+  return this.request("files/get_file_lock_batch", arg, "user", "api", "rpc");
+};
+routes.filesGetMetadata = function(arg) {
+  return this.request("files/get_metadata", arg, "user", "api", "rpc");
+};
+routes.filesGetPreview = function(arg) {
+  return this.request("files/get_preview", arg, "user", "content", "download");
+};
+routes.filesGetTemporaryLink = function(arg) {
+  return this.request("files/get_temporary_link", arg, "user", "api", "rpc");
+};
+routes.filesGetTemporaryUploadLink = function(arg) {
+  return this.request("files/get_temporary_upload_link", arg, "user", "api", "rpc");
+};
+routes.filesGetThumbnail = function(arg) {
+  return this.request("files/get_thumbnail", arg, "user", "content", "download");
+};
+routes.filesGetThumbnailV2 = function(arg) {
+  return this.request("files/get_thumbnail_v2", arg, "app, user", "content", "download");
+};
+routes.filesGetThumbnailBatch = function(arg) {
+  return this.request("files/get_thumbnail_batch", arg, "user", "content", "rpc");
+};
+routes.filesListFolder = function(arg) {
+  return this.request("files/list_folder", arg, "user", "api", "rpc");
+};
+routes.filesListFolderContinue = function(arg) {
+  return this.request("files/list_folder/continue", arg, "user", "api", "rpc");
+};
+routes.filesListFolderGetLatestCursor = function(arg) {
+  return this.request("files/list_folder/get_latest_cursor", arg, "user", "api", "rpc");
+};
+routes.filesListFolderLongpoll = function(arg) {
+  return this.request("files/list_folder/longpoll", arg, "noauth", "notify", "rpc");
+};
+routes.filesListRevisions = function(arg) {
+  return this.request("files/list_revisions", arg, "user", "api", "rpc");
+};
+routes.filesLockFileBatch = function(arg) {
+  return this.request("files/lock_file_batch", arg, "user", "api", "rpc");
+};
+routes.filesMoveV2 = function(arg) {
+  return this.request("files/move_v2", arg, "user", "api", "rpc");
+};
+routes.filesMove = function(arg) {
+  return this.request("files/move", arg, "user", "api", "rpc");
+};
+routes.filesMoveBatchV2 = function(arg) {
+  return this.request("files/move_batch_v2", arg, "user", "api", "rpc");
+};
+routes.filesMoveBatch = function(arg) {
+  return this.request("files/move_batch", arg, "user", "api", "rpc");
+};
+routes.filesMoveBatchCheckV2 = function(arg) {
+  return this.request("files/move_batch/check_v2", arg, "user", "api", "rpc");
+};
+routes.filesMoveBatchCheck = function(arg) {
+  return this.request("files/move_batch/check", arg, "user", "api", "rpc");
+};
+routes.filesPaperCreate = function(arg) {
+  return this.request("files/paper/create", arg, "user", "api", "upload");
+};
+routes.filesPaperUpdate = function(arg) {
+  return this.request("files/paper/update", arg, "user", "api", "upload");
+};
+routes.filesPermanentlyDelete = function(arg) {
+  return this.request("files/permanently_delete", arg, "user", "api", "rpc");
+};
+routes.filesPropertiesAdd = function(arg) {
+  return this.request("files/properties/add", arg, "user", "api", "rpc");
+};
+routes.filesPropertiesOverwrite = function(arg) {
+  return this.request("files/properties/overwrite", arg, "user", "api", "rpc");
+};
+routes.filesPropertiesRemove = function(arg) {
+  return this.request("files/properties/remove", arg, "user", "api", "rpc");
+};
+routes.filesPropertiesTemplateGet = function(arg) {
+  return this.request("files/properties/template/get", arg, "user", "api", "rpc");
+};
+routes.filesPropertiesTemplateList = function() {
+  return this.request("files/properties/template/list", null, "user", "api", "rpc");
+};
+routes.filesPropertiesUpdate = function(arg) {
+  return this.request("files/properties/update", arg, "user", "api", "rpc");
+};
+routes.filesRestore = function(arg) {
+  return this.request("files/restore", arg, "user", "api", "rpc");
+};
+routes.filesSaveUrl = function(arg) {
+  return this.request("files/save_url", arg, "user", "api", "rpc");
+};
+routes.filesSaveUrlCheckJobStatus = function(arg) {
+  return this.request("files/save_url/check_job_status", arg, "user", "api", "rpc");
+};
+routes.filesSearch = function(arg) {
+  return this.request("files/search", arg, "user", "api", "rpc");
+};
+routes.filesSearchV2 = function(arg) {
+  return this.request("files/search_v2", arg, "user", "api", "rpc");
+};
+routes.filesSearchContinueV2 = function(arg) {
+  return this.request("files/search/continue_v2", arg, "user", "api", "rpc");
+};
+routes.filesUnlockFileBatch = function(arg) {
+  return this.request("files/unlock_file_batch", arg, "user", "api", "rpc");
+};
+routes.filesUpload = function(arg) {
+  return this.request("files/upload", arg, "user", "content", "upload");
+};
+routes.filesUploadSessionAppendV2 = function(arg) {
+  return this.request("files/upload_session/append_v2", arg, "user", "content", "upload");
+};
+routes.filesUploadSessionAppend = function(arg) {
+  return this.request("files/upload_session/append", arg, "user", "content", "upload");
+};
+routes.filesUploadSessionFinish = function(arg) {
+  return this.request("files/upload_session/finish", arg, "user", "content", "upload");
+};
+routes.filesUploadSessionFinishBatch = function(arg) {
+  return this.request("files/upload_session/finish_batch", arg, "user", "api", "rpc");
+};
+routes.filesUploadSessionFinishBatchCheck = function(arg) {
+  return this.request("files/upload_session/finish_batch/check", arg, "user", "api", "rpc");
+};
+routes.filesUploadSessionStart = function(arg) {
+  return this.request("files/upload_session/start", arg, "user", "content", "upload");
+};
+routes.paperDocsArchive = function(arg) {
+  return this.request("paper/docs/archive", arg, "user", "api", "rpc");
+};
+routes.paperDocsCreate = function(arg) {
+  return this.request("paper/docs/create", arg, "user", "api", "upload");
+};
+routes.paperDocsDownload = function(arg) {
+  return this.request("paper/docs/download", arg, "user", "api", "download");
+};
+routes.paperDocsFolderUsersList = function(arg) {
+  return this.request("paper/docs/folder_users/list", arg, "user", "api", "rpc");
+};
+routes.paperDocsFolderUsersListContinue = function(arg) {
+  return this.request("paper/docs/folder_users/list/continue", arg, "user", "api", "rpc");
+};
+routes.paperDocsGetFolderInfo = function(arg) {
+  return this.request("paper/docs/get_folder_info", arg, "user", "api", "rpc");
+};
+routes.paperDocsList = function(arg) {
+  return this.request("paper/docs/list", arg, "user", "api", "rpc");
+};
+routes.paperDocsListContinue = function(arg) {
+  return this.request("paper/docs/list/continue", arg, "user", "api", "rpc");
+};
+routes.paperDocsPermanentlyDelete = function(arg) {
+  return this.request("paper/docs/permanently_delete", arg, "user", "api", "rpc");
+};
+routes.paperDocsSharingPolicyGet = function(arg) {
+  return this.request("paper/docs/sharing_policy/get", arg, "user", "api", "rpc");
+};
+routes.paperDocsSharingPolicySet = function(arg) {
+  return this.request("paper/docs/sharing_policy/set", arg, "user", "api", "rpc");
+};
+routes.paperDocsUpdate = function(arg) {
+  return this.request("paper/docs/update", arg, "user", "api", "upload");
+};
+routes.paperDocsUsersAdd = function(arg) {
+  return this.request("paper/docs/users/add", arg, "user", "api", "rpc");
+};
+routes.paperDocsUsersList = function(arg) {
+  return this.request("paper/docs/users/list", arg, "user", "api", "rpc");
+};
+routes.paperDocsUsersListContinue = function(arg) {
+  return this.request("paper/docs/users/list/continue", arg, "user", "api", "rpc");
+};
+routes.paperDocsUsersRemove = function(arg) {
+  return this.request("paper/docs/users/remove", arg, "user", "api", "rpc");
+};
+routes.paperFoldersCreate = function(arg) {
+  return this.request("paper/folders/create", arg, "user", "api", "rpc");
+};
+routes.sharingAddFileMember = function(arg) {
+  return this.request("sharing/add_file_member", arg, "user", "api", "rpc");
+};
+routes.sharingAddFolderMember = function(arg) {
+  return this.request("sharing/add_folder_member", arg, "user", "api", "rpc");
+};
+routes.sharingChangeFileMemberAccess = function(arg) {
+  return this.request("sharing/change_file_member_access", arg, "user", "api", "rpc");
+};
+routes.sharingCheckJobStatus = function(arg) {
+  return this.request("sharing/check_job_status", arg, "user", "api", "rpc");
+};
+routes.sharingCheckRemoveMemberJobStatus = function(arg) {
+  return this.request("sharing/check_remove_member_job_status", arg, "user", "api", "rpc");
+};
+routes.sharingCheckShareJobStatus = function(arg) {
+  return this.request("sharing/check_share_job_status", arg, "user", "api", "rpc");
+};
+routes.sharingCreateSharedLink = function(arg) {
+  return this.request("sharing/create_shared_link", arg, "user", "api", "rpc");
+};
+routes.sharingCreateSharedLinkWithSettings = function(arg) {
+  return this.request("sharing/create_shared_link_with_settings", arg, "user", "api", "rpc");
+};
+routes.sharingGetFileMetadata = function(arg) {
+  return this.request("sharing/get_file_metadata", arg, "user", "api", "rpc");
+};
+routes.sharingGetFileMetadataBatch = function(arg) {
+  return this.request("sharing/get_file_metadata/batch", arg, "user", "api", "rpc");
+};
+routes.sharingGetFolderMetadata = function(arg) {
+  return this.request("sharing/get_folder_metadata", arg, "user", "api", "rpc");
+};
+routes.sharingGetSharedLinkFile = function(arg) {
+  return this.request("sharing/get_shared_link_file", arg, "user", "content", "download");
+};
+routes.sharingGetSharedLinkMetadata = function(arg) {
+  return this.request("sharing/get_shared_link_metadata", arg, "user", "api", "rpc");
+};
+routes.sharingGetSharedLinks = function(arg) {
+  return this.request("sharing/get_shared_links", arg, "user", "api", "rpc");
+};
+routes.sharingListFileMembers = function(arg) {
+  return this.request("sharing/list_file_members", arg, "user", "api", "rpc");
+};
+routes.sharingListFileMembersBatch = function(arg) {
+  return this.request("sharing/list_file_members/batch", arg, "user", "api", "rpc");
+};
+routes.sharingListFileMembersContinue = function(arg) {
+  return this.request("sharing/list_file_members/continue", arg, "user", "api", "rpc");
+};
+routes.sharingListFolderMembers = function(arg) {
+  return this.request("sharing/list_folder_members", arg, "user", "api", "rpc");
+};
+routes.sharingListFolderMembersContinue = function(arg) {
+  return this.request("sharing/list_folder_members/continue", arg, "user", "api", "rpc");
+};
+routes.sharingListFolders = function(arg) {
+  return this.request("sharing/list_folders", arg, "user", "api", "rpc");
+};
+routes.sharingListFoldersContinue = function(arg) {
+  return this.request("sharing/list_folders/continue", arg, "user", "api", "rpc");
+};
+routes.sharingListMountableFolders = function(arg) {
+  return this.request("sharing/list_mountable_folders", arg, "user", "api", "rpc");
+};
+routes.sharingListMountableFoldersContinue = function(arg) {
+  return this.request("sharing/list_mountable_folders/continue", arg, "user", "api", "rpc");
+};
+routes.sharingListReceivedFiles = function(arg) {
+  return this.request("sharing/list_received_files", arg, "user", "api", "rpc");
+};
+routes.sharingListReceivedFilesContinue = function(arg) {
+  return this.request("sharing/list_received_files/continue", arg, "user", "api", "rpc");
+};
+routes.sharingListSharedLinks = function(arg) {
+  return this.request("sharing/list_shared_links", arg, "user", "api", "rpc");
+};
+routes.sharingModifySharedLinkSettings = function(arg) {
+  return this.request("sharing/modify_shared_link_settings", arg, "user", "api", "rpc");
+};
+routes.sharingMountFolder = function(arg) {
+  return this.request("sharing/mount_folder", arg, "user", "api", "rpc");
+};
+routes.sharingRelinquishFileMembership = function(arg) {
+  return this.request("sharing/relinquish_file_membership", arg, "user", "api", "rpc");
+};
+routes.sharingRelinquishFolderMembership = function(arg) {
+  return this.request("sharing/relinquish_folder_membership", arg, "user", "api", "rpc");
+};
+routes.sharingRemoveFileMember = function(arg) {
+  return this.request("sharing/remove_file_member", arg, "user", "api", "rpc");
+};
+routes.sharingRemoveFileMember2 = function(arg) {
+  return this.request("sharing/remove_file_member_2", arg, "user", "api", "rpc");
+};
+routes.sharingRemoveFolderMember = function(arg) {
+  return this.request("sharing/remove_folder_member", arg, "user", "api", "rpc");
+};
+routes.sharingRevokeSharedLink = function(arg) {
+  return this.request("sharing/revoke_shared_link", arg, "user", "api", "rpc");
+};
+routes.sharingSetAccessInheritance = function(arg) {
+  return this.request("sharing/set_access_inheritance", arg, "user", "api", "rpc");
+};
+routes.sharingShareFolder = function(arg) {
+  return this.request("sharing/share_folder", arg, "user", "api", "rpc");
+};
+routes.sharingTransferFolder = function(arg) {
+  return this.request("sharing/transfer_folder", arg, "user", "api", "rpc");
+};
+routes.sharingUnmountFolder = function(arg) {
+  return this.request("sharing/unmount_folder", arg, "user", "api", "rpc");
+};
+routes.sharingUnshareFile = function(arg) {
+  return this.request("sharing/unshare_file", arg, "user", "api", "rpc");
+};
+routes.sharingUnshareFolder = function(arg) {
+  return this.request("sharing/unshare_folder", arg, "user", "api", "rpc");
+};
+routes.sharingUpdateFileMember = function(arg) {
+  return this.request("sharing/update_file_member", arg, "user", "api", "rpc");
+};
+routes.sharingUpdateFolderMember = function(arg) {
+  return this.request("sharing/update_folder_member", arg, "user", "api", "rpc");
+};
+routes.sharingUpdateFolderPolicy = function(arg) {
+  return this.request("sharing/update_folder_policy", arg, "user", "api", "rpc");
+};
+routes.teamDevicesListMemberDevices = function(arg) {
+  return this.request("team/devices/list_member_devices", arg, "team", "api", "rpc");
+};
+routes.teamDevicesListMembersDevices = function(arg) {
+  return this.request("team/devices/list_members_devices", arg, "team", "api", "rpc");
+};
+routes.teamDevicesListTeamDevices = function(arg) {
+  return this.request("team/devices/list_team_devices", arg, "team", "api", "rpc");
+};
+routes.teamDevicesRevokeDeviceSession = function(arg) {
+  return this.request("team/devices/revoke_device_session", arg, "team", "api", "rpc");
+};
+routes.teamDevicesRevokeDeviceSessionBatch = function(arg) {
+  return this.request("team/devices/revoke_device_session_batch", arg, "team", "api", "rpc");
+};
+routes.teamFeaturesGetValues = function(arg) {
+  return this.request("team/features/get_values", arg, "team", "api", "rpc");
+};
+routes.teamGetInfo = function() {
+  return this.request("team/get_info", null, "team", "api", "rpc");
+};
+routes.teamGroupsCreate = function(arg) {
+  return this.request("team/groups/create", arg, "team", "api", "rpc");
+};
+routes.teamGroupsDelete = function(arg) {
+  return this.request("team/groups/delete", arg, "team", "api", "rpc");
+};
+routes.teamGroupsGetInfo = function(arg) {
+  return this.request("team/groups/get_info", arg, "team", "api", "rpc");
+};
+routes.teamGroupsJobStatusGet = function(arg) {
+  return this.request("team/groups/job_status/get", arg, "team", "api", "rpc");
+};
+routes.teamGroupsList = function(arg) {
+  return this.request("team/groups/list", arg, "team", "api", "rpc");
+};
+routes.teamGroupsListContinue = function(arg) {
+  return this.request("team/groups/list/continue", arg, "team", "api", "rpc");
+};
+routes.teamGroupsMembersAdd = function(arg) {
+  return this.request("team/groups/members/add", arg, "team", "api", "rpc");
+};
+routes.teamGroupsMembersList = function(arg) {
+  return this.request("team/groups/members/list", arg, "team", "api", "rpc");
+};
+routes.teamGroupsMembersListContinue = function(arg) {
+  return this.request("team/groups/members/list/continue", arg, "team", "api", "rpc");
+};
+routes.teamGroupsMembersRemove = function(arg) {
+  return this.request("team/groups/members/remove", arg, "team", "api", "rpc");
+};
+routes.teamGroupsMembersSetAccessType = function(arg) {
+  return this.request("team/groups/members/set_access_type", arg, "team", "api", "rpc");
+};
+routes.teamGroupsUpdate = function(arg) {
+  return this.request("team/groups/update", arg, "team", "api", "rpc");
+};
+routes.teamLegalHoldsCreatePolicy = function(arg) {
+  return this.request("team/legal_holds/create_policy", arg, "team", "api", "rpc");
+};
+routes.teamLegalHoldsGetPolicy = function(arg) {
+  return this.request("team/legal_holds/get_policy", arg, "team", "api", "rpc");
+};
+routes.teamLegalHoldsListHeldRevisions = function(arg) {
+  return this.request("team/legal_holds/list_held_revisions", arg, "team", "api", "rpc");
+};
+routes.teamLegalHoldsListHeldRevisionsContinue = function(arg) {
+  return this.request("team/legal_holds/list_held_revisions_continue", arg, "team", "api", "rpc");
+};
+routes.teamLegalHoldsListPolicies = function(arg) {
+  return this.request("team/legal_holds/list_policies", arg, "team", "api", "rpc");
+};
+routes.teamLegalHoldsReleasePolicy = function(arg) {
+  return this.request("team/legal_holds/release_policy", arg, "team", "api", "rpc");
+};
+routes.teamLegalHoldsUpdatePolicy = function(arg) {
+  return this.request("team/legal_holds/update_policy", arg, "team", "api", "rpc");
+};
+routes.teamLinkedAppsListMemberLinkedApps = function(arg) {
+  return this.request("team/linked_apps/list_member_linked_apps", arg, "team", "api", "rpc");
+};
+routes.teamLinkedAppsListMembersLinkedApps = function(arg) {
+  return this.request("team/linked_apps/list_members_linked_apps", arg, "team", "api", "rpc");
+};
+routes.teamLinkedAppsListTeamLinkedApps = function(arg) {
+  return this.request("team/linked_apps/list_team_linked_apps", arg, "team", "api", "rpc");
+};
+routes.teamLinkedAppsRevokeLinkedApp = function(arg) {
+  return this.request("team/linked_apps/revoke_linked_app", arg, "team", "api", "rpc");
+};
+routes.teamLinkedAppsRevokeLinkedAppBatch = function(arg) {
+  return this.request("team/linked_apps/revoke_linked_app_batch", arg, "team", "api", "rpc");
+};
+routes.teamMemberSpaceLimitsExcludedUsersAdd = function(arg) {
+  return this.request("team/member_space_limits/excluded_users/add", arg, "team", "api", "rpc");
+};
+routes.teamMemberSpaceLimitsExcludedUsersList = function(arg) {
+  return this.request("team/member_space_limits/excluded_users/list", arg, "team", "api", "rpc");
+};
+routes.teamMemberSpaceLimitsExcludedUsersListContinue = function(arg) {
+  return this.request("team/member_space_limits/excluded_users/list/continue", arg, "team", "api", "rpc");
+};
+routes.teamMemberSpaceLimitsExcludedUsersRemove = function(arg) {
+  return this.request("team/member_space_limits/excluded_users/remove", arg, "team", "api", "rpc");
+};
+routes.teamMemberSpaceLimitsGetCustomQuota = function(arg) {
+  return this.request("team/member_space_limits/get_custom_quota", arg, "team", "api", "rpc");
+};
+routes.teamMemberSpaceLimitsRemoveCustomQuota = function(arg) {
+  return this.request("team/member_space_limits/remove_custom_quota", arg, "team", "api", "rpc");
+};
+routes.teamMemberSpaceLimitsSetCustomQuota = function(arg) {
+  return this.request("team/member_space_limits/set_custom_quota", arg, "team", "api", "rpc");
+};
+routes.teamMembersAddV2 = function(arg) {
+  return this.request("team/members/add_v2", arg, "team", "api", "rpc");
+};
+routes.teamMembersAdd = function(arg) {
+  return this.request("team/members/add", arg, "team", "api", "rpc");
+};
+routes.teamMembersAddJobStatusGetV2 = function(arg) {
+  return this.request("team/members/add/job_status/get_v2", arg, "team", "api", "rpc");
+};
+routes.teamMembersAddJobStatusGet = function(arg) {
+  return this.request("team/members/add/job_status/get", arg, "team", "api", "rpc");
+};
+routes.teamMembersDeleteProfilePhotoV2 = function(arg) {
+  return this.request("team/members/delete_profile_photo_v2", arg, "team", "api", "rpc");
+};
+routes.teamMembersDeleteProfilePhoto = function(arg) {
+  return this.request("team/members/delete_profile_photo", arg, "team", "api", "rpc");
+};
+routes.teamMembersGetAvailableTeamMemberRoles = function() {
+  return this.request("team/members/get_available_team_member_roles", null, "team", "api", "rpc");
+};
+routes.teamMembersGetInfoV2 = function(arg) {
+  return this.request("team/members/get_info_v2", arg, "team", "api", "rpc");
+};
+routes.teamMembersGetInfo = function(arg) {
+  return this.request("team/members/get_info", arg, "team", "api", "rpc");
+};
+routes.teamMembersListV2 = function(arg) {
+  return this.request("team/members/list_v2", arg, "team", "api", "rpc");
+};
+routes.teamMembersList = function(arg) {
+  return this.request("team/members/list", arg, "team", "api", "rpc");
+};
+routes.teamMembersListContinueV2 = function(arg) {
+  return this.request("team/members/list/continue_v2", arg, "team", "api", "rpc");
+};
+routes.teamMembersListContinue = function(arg) {
+  return this.request("team/members/list/continue", arg, "team", "api", "rpc");
+};
+routes.teamMembersMoveFormerMemberFiles = function(arg) {
+  return this.request("team/members/move_former_member_files", arg, "team", "api", "rpc");
+};
+routes.teamMembersMoveFormerMemberFilesJobStatusCheck = function(arg) {
+  return this.request("team/members/move_former_member_files/job_status/check", arg, "team", "api", "rpc");
+};
+routes.teamMembersRecover = function(arg) {
+  return this.request("team/members/recover", arg, "team", "api", "rpc");
+};
+routes.teamMembersRemove = function(arg) {
+  return this.request("team/members/remove", arg, "team", "api", "rpc");
+};
+routes.teamMembersRemoveJobStatusGet = function(arg) {
+  return this.request("team/members/remove/job_status/get", arg, "team", "api", "rpc");
+};
+routes.teamMembersSecondaryEmailsAdd = function(arg) {
+  return this.request("team/members/secondary_emails/add", arg, "team", "api", "rpc");
+};
+routes.teamMembersSecondaryEmailsDelete = function(arg) {
+  return this.request("team/members/secondary_emails/delete", arg, "team", "api", "rpc");
+};
+routes.teamMembersSecondaryEmailsResendVerificationEmails = function(arg) {
+  return this.request("team/members/secondary_emails/resend_verification_emails", arg, "team", "api", "rpc");
+};
+routes.teamMembersSendWelcomeEmail = function(arg) {
+  return this.request("team/members/send_welcome_email", arg, "team", "api", "rpc");
+};
+routes.teamMembersSetAdminPermissionsV2 = function(arg) {
+  return this.request("team/members/set_admin_permissions_v2", arg, "team", "api", "rpc");
+};
+routes.teamMembersSetAdminPermissions = function(arg) {
+  return this.request("team/members/set_admin_permissions", arg, "team", "api", "rpc");
+};
+routes.teamMembersSetProfileV2 = function(arg) {
+  return this.request("team/members/set_profile_v2", arg, "team", "api", "rpc");
+};
+routes.teamMembersSetProfile = function(arg) {
+  return this.request("team/members/set_profile", arg, "team", "api", "rpc");
+};
+routes.teamMembersSetProfilePhotoV2 = function(arg) {
+  return this.request("team/members/set_profile_photo_v2", arg, "team", "api", "rpc");
+};
+routes.teamMembersSetProfilePhoto = function(arg) {
+  return this.request("team/members/set_profile_photo", arg, "team", "api", "rpc");
+};
+routes.teamMembersSuspend = function(arg) {
+  return this.request("team/members/suspend", arg, "team", "api", "rpc");
+};
+routes.teamMembersUnsuspend = function(arg) {
+  return this.request("team/members/unsuspend", arg, "team", "api", "rpc");
+};
+routes.teamNamespacesList = function(arg) {
+  return this.request("team/namespaces/list", arg, "team", "api", "rpc");
+};
+routes.teamNamespacesListContinue = function(arg) {
+  return this.request("team/namespaces/list/continue", arg, "team", "api", "rpc");
+};
+routes.teamPropertiesTemplateAdd = function(arg) {
+  return this.request("team/properties/template/add", arg, "team", "api", "rpc");
+};
+routes.teamPropertiesTemplateGet = function(arg) {
+  return this.request("team/properties/template/get", arg, "team", "api", "rpc");
+};
+routes.teamPropertiesTemplateList = function() {
+  return this.request("team/properties/template/list", null, "team", "api", "rpc");
+};
+routes.teamPropertiesTemplateUpdate = function(arg) {
+  return this.request("team/properties/template/update", arg, "team", "api", "rpc");
+};
+routes.teamReportsGetActivity = function(arg) {
+  return this.request("team/reports/get_activity", arg, "team", "api", "rpc");
+};
+routes.teamReportsGetDevices = function(arg) {
+  return this.request("team/reports/get_devices", arg, "team", "api", "rpc");
+};
+routes.teamReportsGetMembership = function(arg) {
+  return this.request("team/reports/get_membership", arg, "team", "api", "rpc");
+};
+routes.teamReportsGetStorage = function(arg) {
+  return this.request("team/reports/get_storage", arg, "team", "api", "rpc");
+};
+routes.teamTeamFolderActivate = function(arg) {
+  return this.request("team/team_folder/activate", arg, "team", "api", "rpc");
+};
+routes.teamTeamFolderArchive = function(arg) {
+  return this.request("team/team_folder/archive", arg, "team", "api", "rpc");
+};
+routes.teamTeamFolderArchiveCheck = function(arg) {
+  return this.request("team/team_folder/archive/check", arg, "team", "api", "rpc");
+};
+routes.teamTeamFolderCreate = function(arg) {
+  return this.request("team/team_folder/create", arg, "team", "api", "rpc");
+};
+routes.teamTeamFolderGetInfo = function(arg) {
+  return this.request("team/team_folder/get_info", arg, "team", "api", "rpc");
+};
+routes.teamTeamFolderList = function(arg) {
+  return this.request("team/team_folder/list", arg, "team", "api", "rpc");
+};
+routes.teamTeamFolderListContinue = function(arg) {
+  return this.request("team/team_folder/list/continue", arg, "team", "api", "rpc");
+};
+routes.teamTeamFolderPermanentlyDelete = function(arg) {
+  return this.request("team/team_folder/permanently_delete", arg, "team", "api", "rpc");
+};
+routes.teamTeamFolderRename = function(arg) {
+  return this.request("team/team_folder/rename", arg, "team", "api", "rpc");
+};
+routes.teamTeamFolderUpdateSyncSettings = function(arg) {
+  return this.request("team/team_folder/update_sync_settings", arg, "team", "api", "rpc");
+};
+routes.teamTokenGetAuthenticatedAdmin = function() {
+  return this.request("team/token/get_authenticated_admin", null, "team", "api", "rpc");
+};
+routes.teamLogGetEvents = function(arg) {
+  return this.request("team_log/get_events", arg, "team", "api", "rpc");
+};
+routes.teamLogGetEventsContinue = function(arg) {
+  return this.request("team_log/get_events/continue", arg, "team", "api", "rpc");
+};
+routes.usersFeaturesGetValues = function(arg) {
+  return this.request("users/features/get_values", arg, "user", "api", "rpc");
+};
+routes.usersGetAccount = function(arg) {
+  return this.request("users/get_account", arg, "user", "api", "rpc");
+};
+routes.usersGetAccountBatch = function(arg) {
+  return this.request("users/get_account_batch", arg, "user", "api", "rpc");
+};
+routes.usersGetCurrentAccount = function() {
+  return this.request("users/get_current_account", null, "user", "api", "rpc");
+};
+routes.usersGetSpaceUsage = function() {
+  return this.request("users/get_space_usage", null, "user", "api", "rpc");
+};
+function getSafeUnicode(c) {
+  var unicode = "000".concat(c.charCodeAt(0).toString(16)).slice(-4);
+  return "\\u".concat(unicode);
+}
+var baseApiUrl = function baseApiUrl2(subdomain) {
+  var domain = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : DEFAULT_API_DOMAIN;
+  var domainDelimiter = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : ".";
+  if (domain !== DEFAULT_API_DOMAIN && TEST_DOMAIN_MAPPINGS[subdomain] !== void 0) {
+    subdomain = TEST_DOMAIN_MAPPINGS[subdomain];
+    domainDelimiter = "-";
+  }
+  return "https://".concat(subdomain).concat(domainDelimiter).concat(domain, "/2/");
+};
+var OAuth2AuthorizationUrl = function OAuth2AuthorizationUrl2() {
+  var domain = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : DEFAULT_DOMAIN;
+  if (domain !== DEFAULT_DOMAIN) {
+    domain = "meta-".concat(domain);
+  }
+  return "https://".concat(domain, "/oauth2/authorize");
+};
+var OAuth2TokenUrl = function OAuth2TokenUrl2() {
+  var domain = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : DEFAULT_API_DOMAIN;
+  var domainDelimiter = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : ".";
+  var subdomain = "api";
+  if (domain !== DEFAULT_API_DOMAIN) {
+    subdomain = TEST_DOMAIN_MAPPINGS[subdomain];
+    domainDelimiter = "-";
+  }
+  return "https://".concat(subdomain).concat(domainDelimiter).concat(domain, "/oauth2/token");
+};
+function httpHeaderSafeJson(args) {
+  return JSON.stringify(args).replace(/[\u007f-\uffff]/g, getSafeUnicode);
+}
+function getTokenExpiresAtDate(expiresIn) {
+  return new Date(Date.now() + expiresIn * 1e3);
+}
+function isWindowOrWorker() {
+  return typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope || typeof module === "undefined" || typeof window !== "undefined";
+}
+function isBrowserEnv() {
+  return typeof window !== "undefined";
+}
+function createBrowserSafeString(toBeConverted) {
+  var convertedString = toBeConverted.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  return convertedString;
+}
+function _typeof(obj) {
+  "@babel/helpers - typeof";
+  if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") {
+    _typeof = function _typeof2(obj2) {
+      return typeof obj2;
+    };
+  } else {
+    _typeof = function _typeof2(obj2) {
+      return obj2 && typeof Symbol === "function" && obj2.constructor === Symbol && obj2 !== Symbol.prototype ? "symbol" : typeof obj2;
+    };
+  }
+  return _typeof(obj);
+}
+function _classCallCheck(instance, Constructor) {
+  if (!(instance instanceof Constructor)) {
+    throw new TypeError("Cannot call a class as a function");
+  }
+}
+function _inherits(subClass, superClass) {
+  if (typeof superClass !== "function" && superClass !== null) {
+    throw new TypeError("Super expression must either be null or a function");
+  }
+  subClass.prototype = Object.create(superClass && superClass.prototype, {constructor: {value: subClass, writable: true, configurable: true}});
+  if (superClass)
+    _setPrototypeOf(subClass, superClass);
+}
+function _createSuper(Derived) {
+  var hasNativeReflectConstruct = _isNativeReflectConstruct();
+  return function _createSuperInternal() {
+    var Super = _getPrototypeOf(Derived), result;
+    if (hasNativeReflectConstruct) {
+      var NewTarget = _getPrototypeOf(this).constructor;
+      result = Reflect.construct(Super, arguments, NewTarget);
+    } else {
+      result = Super.apply(this, arguments);
+    }
+    return _possibleConstructorReturn(this, result);
+  };
+}
+function _possibleConstructorReturn(self2, call) {
+  if (call && (_typeof(call) === "object" || typeof call === "function")) {
+    return call;
+  }
+  return _assertThisInitialized(self2);
+}
+function _assertThisInitialized(self2) {
+  if (self2 === void 0) {
+    throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+  }
+  return self2;
+}
+function _wrapNativeSuper(Class) {
+  var _cache = typeof Map === "function" ? new Map() : void 0;
+  _wrapNativeSuper = function _wrapNativeSuper2(Class2) {
+    if (Class2 === null || !_isNativeFunction(Class2))
+      return Class2;
+    if (typeof Class2 !== "function") {
       throw new TypeError("Super expression must either be null or a function");
     }
-
-    subClass.prototype = Object.create(superClass && superClass.prototype, {
-      constructor: {
-        value: subClass,
-        writable: true,
-        configurable: true
-      }
-    });
-    if (superClass) _setPrototypeOf(subClass, superClass);
-  }
-
-  function _getPrototypeOf(o) {
-    _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf : function _getPrototypeOf(o) {
-      return o.__proto__ || Object.getPrototypeOf(o);
+    if (typeof _cache !== "undefined") {
+      if (_cache.has(Class2))
+        return _cache.get(Class2);
+      _cache.set(Class2, Wrapper);
+    }
+    function Wrapper() {
+      return _construct(Class2, arguments, _getPrototypeOf(this).constructor);
+    }
+    Wrapper.prototype = Object.create(Class2.prototype, {constructor: {value: Wrapper, enumerable: false, writable: true, configurable: true}});
+    return _setPrototypeOf(Wrapper, Class2);
+  };
+  return _wrapNativeSuper(Class);
+}
+function _construct(Parent, args, Class) {
+  if (_isNativeReflectConstruct()) {
+    _construct = Reflect.construct;
+  } else {
+    _construct = function _construct2(Parent2, args2, Class2) {
+      var a = [null];
+      a.push.apply(a, args2);
+      var Constructor = Function.bind.apply(Parent2, a);
+      var instance = new Constructor();
+      if (Class2)
+        _setPrototypeOf(instance, Class2.prototype);
+      return instance;
     };
-    return _getPrototypeOf(o);
   }
-
-  function _setPrototypeOf(o, p) {
-    _setPrototypeOf = Object.setPrototypeOf || function _setPrototypeOf(o, p) {
-      o.__proto__ = p;
-      return o;
-    };
-
-    return _setPrototypeOf(o, p);
+  return _construct.apply(null, arguments);
+}
+function _isNativeReflectConstruct() {
+  if (typeof Reflect === "undefined" || !Reflect.construct)
+    return false;
+  if (Reflect.construct.sham)
+    return false;
+  if (typeof Proxy === "function")
+    return true;
+  try {
+    Date.prototype.toString.call(Reflect.construct(Date, [], function() {
+    }));
+    return true;
+  } catch (e) {
+    return false;
   }
-
-  function _isNativeReflectConstruct() {
-    if (typeof Reflect === "undefined" || !Reflect.construct) return false;
-    if (Reflect.construct.sham) return false;
-    if (typeof Proxy === "function") return true;
-
+}
+function _isNativeFunction(fn) {
+  return Function.toString.call(fn).indexOf("[native code]") !== -1;
+}
+function _setPrototypeOf(o, p) {
+  _setPrototypeOf = Object.setPrototypeOf || function _setPrototypeOf2(o2, p2) {
+    o2.__proto__ = p2;
+    return o2;
+  };
+  return _setPrototypeOf(o, p);
+}
+function _getPrototypeOf(o) {
+  _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf : function _getPrototypeOf2(o2) {
+    return o2.__proto__ || Object.getPrototypeOf(o2);
+  };
+  return _getPrototypeOf(o);
+}
+var DropboxResponseError = /* @__PURE__ */ function(_Error) {
+  _inherits(DropboxResponseError2, _Error);
+  var _super = _createSuper(DropboxResponseError2);
+  function DropboxResponseError2(status, headers, error) {
+    var _this;
+    _classCallCheck(this, DropboxResponseError2);
+    _this = _super.call(this, "Response failed with a ".concat(status, " code"));
+    _this.name = "DropboxResponseError";
+    _this.status = status;
+    _this.headers = headers;
+    _this.error = error;
+    return _this;
+  }
+  return DropboxResponseError2;
+}(/* @__PURE__ */ _wrapNativeSuper(Error));
+function _classCallCheck$1(instance, Constructor) {
+  if (!(instance instanceof Constructor)) {
+    throw new TypeError("Cannot call a class as a function");
+  }
+}
+var DropboxResponse = function DropboxResponse2(status, headers, result) {
+  _classCallCheck$1(this, DropboxResponse2);
+  this.status = status;
+  this.headers = headers;
+  this.result = result;
+};
+function throwAsError(res) {
+  return res.text().then(function(data) {
+    var errorObject;
     try {
-      Date.prototype.toString.call(Reflect.construct(Date, [], function () {}));
-      return true;
-    } catch (e) {
-      return false;
+      errorObject = JSON.parse(data);
+    } catch (error) {
+      errorObject = data;
     }
+    throw new DropboxResponseError(res.status, res.headers, errorObject);
+  });
+}
+function parseResponse(res) {
+  if (!res.ok) {
+    return throwAsError(res);
   }
-
-  function _construct(Parent, args, Class) {
-    if (_isNativeReflectConstruct()) {
-      _construct = Reflect.construct;
-    } else {
-      _construct = function _construct(Parent, args, Class) {
-        var a = [null];
-        a.push.apply(a, args);
-        var Constructor = Function.bind.apply(Parent, a);
-        var instance = new Constructor();
-        if (Class) _setPrototypeOf(instance, Class.prototype);
-        return instance;
-      };
+  return res.text().then(function(data) {
+    var responseObject;
+    try {
+      responseObject = JSON.parse(data);
+    } catch (error) {
+      responseObject = data;
     }
-
-    return _construct.apply(null, arguments);
+    return new DropboxResponse(res.status, res.headers, responseObject);
+  });
+}
+function parseDownloadResponse(res) {
+  if (!res.ok) {
+    return throwAsError(res);
   }
-
-  function _isNativeFunction(fn) {
-    return Function.toString.call(fn).indexOf("[native code]") !== -1;
-  }
-
-  function _wrapNativeSuper(Class) {
-    var _cache = typeof Map === "function" ? new Map() : undefined;
-
-    _wrapNativeSuper = function _wrapNativeSuper(Class) {
-      if (Class === null || !_isNativeFunction(Class)) return Class;
-
-      if (typeof Class !== "function") {
-        throw new TypeError("Super expression must either be null or a function");
-      }
-
-      if (typeof _cache !== "undefined") {
-        if (_cache.has(Class)) return _cache.get(Class);
-
-        _cache.set(Class, Wrapper);
-      }
-
-      function Wrapper() {
-        return _construct(Class, arguments, _getPrototypeOf(this).constructor);
-      }
-
-      Wrapper.prototype = Object.create(Class.prototype, {
-        constructor: {
-          value: Wrapper,
-          enumerable: false,
-          writable: true,
-          configurable: true
-        }
+  return new Promise(function(resolve) {
+    if (isWindowOrWorker()) {
+      res.blob().then(function(data) {
+        return resolve(data);
       });
-      return _setPrototypeOf(Wrapper, Class);
-    };
-
-    return _wrapNativeSuper(Class);
-  }
-
-  function _assertThisInitialized(self) {
-    if (self === void 0) {
-      throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+    } else {
+      res.buffer().then(function(data) {
+        return resolve(data);
+      });
     }
-
-    return self;
-  }
-
-  function _possibleConstructorReturn(self, call) {
-    if (call && (typeof call === "object" || typeof call === "function")) {
-      return call;
+  }).then(function(data) {
+    var result = JSON.parse(res.headers.get("dropbox-api-result"));
+    if (isWindowOrWorker()) {
+      result.fileBlob = data;
+    } else {
+      result.fileBinary = data;
     }
-
-    return _assertThisInitialized(self);
+    return new DropboxResponse(res.status, res.headers, result);
+  });
+}
+function _classCallCheck$2(instance, Constructor) {
+  if (!(instance instanceof Constructor)) {
+    throw new TypeError("Cannot call a class as a function");
   }
-
-  function _createSuper(Derived) {
-    var hasNativeReflectConstruct = _isNativeReflectConstruct();
-
-    return function _createSuperInternal() {
-      var Super = _getPrototypeOf(Derived),
-          result;
-
-      if (hasNativeReflectConstruct) {
-        var NewTarget = _getPrototypeOf(this).constructor;
-
-        result = Reflect.construct(Super, arguments, NewTarget);
-      } else {
-        result = Super.apply(this, arguments);
-      }
-
-      return _possibleConstructorReturn(this, result);
-    };
+}
+function _defineProperties(target, props) {
+  for (var i = 0; i < props.length; i++) {
+    var descriptor = props[i];
+    descriptor.enumerable = descriptor.enumerable || false;
+    descriptor.configurable = true;
+    if ("value" in descriptor)
+      descriptor.writable = true;
+    Object.defineProperty(target, descriptor.key, descriptor);
   }
-
-  var RPC = 'rpc';
-  var UPLOAD = 'upload';
-  var DOWNLOAD = 'download';
-  var APP_AUTH = 'app';
-  var USER_AUTH = 'user';
-  var TEAM_AUTH = 'team';
-  var NO_AUTH = 'noauth';
-  var DEFAULT_API_DOMAIN = 'dropboxapi.com';
-  var DEFAULT_DOMAIN = 'dropbox.com';
-  var TEST_DOMAIN_MAPPINGS = {
-    api: 'api',
-    notify: 'bolt',
-    content: 'api-content'
-  };
-
-  // Auto-generated by Stone, do not modify.
-  var routes = {};
-  /**
-   * Sets a user's profile photo.
-   * @function Dropbox#accountSetProfilePhoto
-   * @arg {AccountSetProfilePhotoArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AccountSetProfilePhotoResult>, Error.<AccountSetProfilePhotoError>>}
-   */
-
-  routes.accountSetProfilePhoto = function (arg) {
-    return this.request('account/set_profile_photo', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Creates an OAuth 2.0 access token from the supplied OAuth 1.0 access token.
-   * @function Dropbox#authTokenFromOauth1
-   * @arg {AuthTokenFromOAuth1Arg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AuthTokenFromOAuth1Result>, Error.<AuthTokenFromOAuth1Error>>}
-   */
-
-
-  routes.authTokenFromOauth1 = function (arg) {
-    return this.request('auth/token/from_oauth1', arg, 'app', 'api', 'rpc');
-  };
-  /**
-   * Disables the access token used to authenticate the call. If there is a
-   * corresponding refresh token for the access token, this disables that refresh
-   * token, as well as any other access tokens for that refresh token.
-   * @function Dropbox#authTokenRevoke
-   * @returns {Promise.<DropboxResponse<void>, Error.<void>>}
-   */
-
-
-  routes.authTokenRevoke = function () {
-    return this.request('auth/token/revoke', null, 'user', 'api', 'rpc');
-  };
-  /**
-   * This endpoint performs App Authentication, validating the supplied app key
-   * and secret, and returns the supplied string, to allow you to test your code
-   * and connection to the Dropbox API. It has no other effect. If you receive an
-   * HTTP 200 response with the supplied query, it indicates at least part of the
-   * Dropbox API infrastructure is working and that the app key and secret valid.
-   * @function Dropbox#checkApp
-   * @arg {CheckEchoArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<CheckEchoResult>, Error.<void>>}
-   */
-
-
-  routes.checkApp = function (arg) {
-    return this.request('check/app', arg, 'app', 'api', 'rpc');
-  };
-  /**
-   * This endpoint performs User Authentication, validating the supplied access
-   * token, and returns the supplied string, to allow you to test your code and
-   * connection to the Dropbox API. It has no other effect. If you receive an HTTP
-   * 200 response with the supplied query, it indicates at least part of the
-   * Dropbox API infrastructure is working and that the access token is valid.
-   * @function Dropbox#checkUser
-   * @arg {CheckEchoArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<CheckEchoResult>, Error.<void>>}
-   */
-
-
-  routes.checkUser = function (arg) {
-    return this.request('check/user', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Removes all manually added contacts. You'll still keep contacts who are on
-   * your team or who you imported. New contacts will be added when you share.
-   * @function Dropbox#contactsDeleteManualContacts
-   * @returns {Promise.<DropboxResponse<void>, Error.<void>>}
-   */
-
-
-  routes.contactsDeleteManualContacts = function () {
-    return this.request('contacts/delete_manual_contacts', null, 'user', 'api', 'rpc');
-  };
-  /**
-   * Removes manually added contacts from the given list.
-   * @function Dropbox#contactsDeleteManualContactsBatch
-   * @arg {ContactsDeleteManualContactsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<ContactsDeleteManualContactsError>>}
-   */
-
-
-  routes.contactsDeleteManualContactsBatch = function (arg) {
-    return this.request('contacts/delete_manual_contacts_batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Add property groups to a Dropbox file. See templates/add_for_user or
-   * templates/add_for_team to create new templates.
-   * @function Dropbox#filePropertiesPropertiesAdd
-   * @arg {FilePropertiesAddPropertiesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilePropertiesAddPropertiesError>>}
-   */
-
-
-  routes.filePropertiesPropertiesAdd = function (arg) {
-    return this.request('file_properties/properties/add', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Overwrite property groups associated with a file. This endpoint should be
-   * used instead of properties/update when property groups are being updated via
-   * a "snapshot" instead of via a "delta". In other words, this endpoint will
-   * delete all omitted fields from a property group, whereas properties/update
-   * will only delete fields that are explicitly marked for deletion.
-   * @function Dropbox#filePropertiesPropertiesOverwrite
-   * @arg {FilePropertiesOverwritePropertyGroupArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilePropertiesInvalidPropertyGroupError>>}
-   */
-
-
-  routes.filePropertiesPropertiesOverwrite = function (arg) {
-    return this.request('file_properties/properties/overwrite', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Permanently removes the specified property group from the file. To remove
-   * specific property field key value pairs, see properties/update. To update a
-   * template, see templates/update_for_user or templates/update_for_team. To
-   * remove a template, see templates/remove_for_user or
-   * templates/remove_for_team.
-   * @function Dropbox#filePropertiesPropertiesRemove
-   * @arg {FilePropertiesRemovePropertiesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilePropertiesRemovePropertiesError>>}
-   */
-
-
-  routes.filePropertiesPropertiesRemove = function (arg) {
-    return this.request('file_properties/properties/remove', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Search across property templates for particular property field values.
-   * @function Dropbox#filePropertiesPropertiesSearch
-   * @arg {FilePropertiesPropertiesSearchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesPropertiesSearchResult>, Error.<FilePropertiesPropertiesSearchError>>}
-   */
-
-
-  routes.filePropertiesPropertiesSearch = function (arg) {
-    return this.request('file_properties/properties/search', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from properties/search, use this to paginate
-   * through all search results.
-   * @function Dropbox#filePropertiesPropertiesSearchContinue
-   * @arg {FilePropertiesPropertiesSearchContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesPropertiesSearchResult>, Error.<FilePropertiesPropertiesSearchContinueError>>}
-   */
-
-
-  routes.filePropertiesPropertiesSearchContinue = function (arg) {
-    return this.request('file_properties/properties/search/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Add, update or remove properties associated with the supplied file and
-   * templates. This endpoint should be used instead of properties/overwrite when
-   * property groups are being updated via a "delta" instead of via a "snapshot" .
-   * In other words, this endpoint will not delete any omitted fields from a
-   * property group, whereas properties/overwrite will delete any fields that are
-   * omitted from a property group.
-   * @function Dropbox#filePropertiesPropertiesUpdate
-   * @arg {FilePropertiesUpdatePropertiesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilePropertiesUpdatePropertiesError>>}
-   */
-
-
-  routes.filePropertiesPropertiesUpdate = function (arg) {
-    return this.request('file_properties/properties/update', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Add a template associated with a team. See properties/add to add properties
-   * to a file or folder. Note: this endpoint will create team-owned templates.
-   * @function Dropbox#filePropertiesTemplatesAddForTeam
-   * @arg {FilePropertiesAddTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesAddTemplateResult>, Error.<FilePropertiesModifyTemplateError>>}
-   */
-
-
-  routes.filePropertiesTemplatesAddForTeam = function (arg) {
-    return this.request('file_properties/templates/add_for_team', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Add a template associated with a user. See properties/add to add properties
-   * to a file. This endpoint can't be called on a team member or admin's behalf.
-   * @function Dropbox#filePropertiesTemplatesAddForUser
-   * @arg {FilePropertiesAddTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesAddTemplateResult>, Error.<FilePropertiesModifyTemplateError>>}
-   */
-
-
-  routes.filePropertiesTemplatesAddForUser = function (arg) {
-    return this.request('file_properties/templates/add_for_user', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get the schema for a specified template.
-   * @function Dropbox#filePropertiesTemplatesGetForTeam
-   * @arg {FilePropertiesGetTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesGetTemplateResult>, Error.<FilePropertiesTemplateError>>}
-   */
-
-
-  routes.filePropertiesTemplatesGetForTeam = function (arg) {
-    return this.request('file_properties/templates/get_for_team', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Get the schema for a specified template. This endpoint can't be called on a
-   * team member or admin's behalf.
-   * @function Dropbox#filePropertiesTemplatesGetForUser
-   * @arg {FilePropertiesGetTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesGetTemplateResult>, Error.<FilePropertiesTemplateError>>}
-   */
-
-
-  routes.filePropertiesTemplatesGetForUser = function (arg) {
-    return this.request('file_properties/templates/get_for_user', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get the template identifiers for a team. To get the schema of each template
-   * use templates/get_for_team.
-   * @function Dropbox#filePropertiesTemplatesListForTeam
-   * @returns {Promise.<DropboxResponse<FilePropertiesListTemplateResult>, Error.<FilePropertiesTemplateError>>}
-   */
-
-
-  routes.filePropertiesTemplatesListForTeam = function () {
-    return this.request('file_properties/templates/list_for_team', null, 'team', 'api', 'rpc');
-  };
-  /**
-   * Get the template identifiers for a team. To get the schema of each template
-   * use templates/get_for_user. This endpoint can't be called on a team member or
-   * admin's behalf.
-   * @function Dropbox#filePropertiesTemplatesListForUser
-   * @returns {Promise.<DropboxResponse<FilePropertiesListTemplateResult>, Error.<FilePropertiesTemplateError>>}
-   */
-
-
-  routes.filePropertiesTemplatesListForUser = function () {
-    return this.request('file_properties/templates/list_for_user', null, 'user', 'api', 'rpc');
-  };
-  /**
-   * Permanently removes the specified template created from
-   * templates/add_for_user. All properties associated with the template will also
-   * be removed. This action cannot be undone.
-   * @function Dropbox#filePropertiesTemplatesRemoveForTeam
-   * @arg {FilePropertiesRemoveTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilePropertiesTemplateError>>}
-   */
-
-
-  routes.filePropertiesTemplatesRemoveForTeam = function (arg) {
-    return this.request('file_properties/templates/remove_for_team', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Permanently removes the specified template created from
-   * templates/add_for_user. All properties associated with the template will also
-   * be removed. This action cannot be undone.
-   * @function Dropbox#filePropertiesTemplatesRemoveForUser
-   * @arg {FilePropertiesRemoveTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilePropertiesTemplateError>>}
-   */
-
-
-  routes.filePropertiesTemplatesRemoveForUser = function (arg) {
-    return this.request('file_properties/templates/remove_for_user', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Update a template associated with a team. This route can update the template
-   * name, the template description and add optional properties to templates.
-   * @function Dropbox#filePropertiesTemplatesUpdateForTeam
-   * @arg {FilePropertiesUpdateTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesUpdateTemplateResult>, Error.<FilePropertiesModifyTemplateError>>}
-   */
-
-
-  routes.filePropertiesTemplatesUpdateForTeam = function (arg) {
-    return this.request('file_properties/templates/update_for_team', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Update a template associated with a user. This route can update the template
-   * name, the template description and add optional properties to templates. This
-   * endpoint can't be called on a team member or admin's behalf.
-   * @function Dropbox#filePropertiesTemplatesUpdateForUser
-   * @arg {FilePropertiesUpdateTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesUpdateTemplateResult>, Error.<FilePropertiesModifyTemplateError>>}
-   */
-
-
-  routes.filePropertiesTemplatesUpdateForUser = function (arg) {
-    return this.request('file_properties/templates/update_for_user', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the total number of file requests owned by this user. Includes both
-   * open and closed file requests.
-   * @function Dropbox#fileRequestsCount
-   * @returns {Promise.<DropboxResponse<FileRequestsCountFileRequestsResult>, Error.<FileRequestsCountFileRequestsError>>}
-   */
-
-
-  routes.fileRequestsCount = function () {
-    return this.request('file_requests/count', null, 'user', 'api', 'rpc');
-  };
-  /**
-   * Creates a file request for this user.
-   * @function Dropbox#fileRequestsCreate
-   * @arg {FileRequestsCreateFileRequestArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FileRequestsFileRequest>, Error.<FileRequestsCreateFileRequestError>>}
-   */
-
-
-  routes.fileRequestsCreate = function (arg) {
-    return this.request('file_requests/create', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Delete a batch of closed file requests.
-   * @function Dropbox#fileRequestsDelete
-   * @arg {FileRequestsDeleteFileRequestArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FileRequestsDeleteFileRequestsResult>, Error.<FileRequestsDeleteFileRequestError>>}
-   */
-
-
-  routes.fileRequestsDelete = function (arg) {
-    return this.request('file_requests/delete', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Delete all closed file requests owned by this user.
-   * @function Dropbox#fileRequestsDeleteAllClosed
-   * @returns {Promise.<DropboxResponse<FileRequestsDeleteAllClosedFileRequestsResult>, Error.<FileRequestsDeleteAllClosedFileRequestsError>>}
-   */
-
-
-  routes.fileRequestsDeleteAllClosed = function () {
-    return this.request('file_requests/delete_all_closed', null, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the specified file request.
-   * @function Dropbox#fileRequestsGet
-   * @arg {FileRequestsGetFileRequestArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FileRequestsFileRequest>, Error.<FileRequestsGetFileRequestError>>}
-   */
-
-
-  routes.fileRequestsGet = function (arg) {
-    return this.request('file_requests/get', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns a list of file requests owned by this user. For apps with the app
-   * folder permission, this will only return file requests with destinations in
-   * the app folder.
-   * @function Dropbox#fileRequestsListV2
-   * @arg {FileRequestsListFileRequestsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FileRequestsListFileRequestsV2Result>, Error.<FileRequestsListFileRequestsError>>}
-   */
-
-
-  routes.fileRequestsListV2 = function (arg) {
-    return this.request('file_requests/list_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns a list of file requests owned by this user. For apps with the app
-   * folder permission, this will only return file requests with destinations in
-   * the app folder.
-   * @function Dropbox#fileRequestsList
-   * @returns {Promise.<DropboxResponse<FileRequestsListFileRequestsResult>, Error.<FileRequestsListFileRequestsError>>}
-   */
-
-
-  routes.fileRequestsList = function () {
-    return this.request('file_requests/list', null, 'user', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from list_v2, use this to paginate through
-   * all file requests. The cursor must come from a previous call to list_v2 or
-   * list/continue.
-   * @function Dropbox#fileRequestsListContinue
-   * @arg {FileRequestsListFileRequestsContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FileRequestsListFileRequestsV2Result>, Error.<FileRequestsListFileRequestsContinueError>>}
-   */
-
-
-  routes.fileRequestsListContinue = function (arg) {
-    return this.request('file_requests/list/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Update a file request.
-   * @function Dropbox#fileRequestsUpdate
-   * @arg {FileRequestsUpdateFileRequestArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FileRequestsFileRequest>, Error.<FileRequestsUpdateFileRequestError>>}
-   */
-
-
-  routes.fileRequestsUpdate = function (arg) {
-    return this.request('file_requests/update', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the metadata for a file or folder. This is an alpha endpoint
-   * compatible with the properties API. Note: Metadata for the root folder is
-   * unsupported.
-   * @function Dropbox#filesAlphaGetMetadata
-   * @deprecated
-   * @arg {FilesAlphaGetMetadataArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<(FilesFileMetadata|FilesFolderMetadata|FilesDeletedMetadata)>, Error.<FilesAlphaGetMetadataError>>}
-   */
-
-
-  routes.filesAlphaGetMetadata = function (arg) {
-    return this.request('files/alpha/get_metadata', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Create a new file with the contents provided in the request. Note that this
-   * endpoint is part of the properties API alpha and is slightly different from
-   * upload. Do not use this to upload a file larger than 150 MB. Instead, create
-   * an upload session with upload_session/start.
-   * @function Dropbox#filesAlphaUpload
-   * @deprecated
-   * @arg {FilesCommitInfoWithProperties} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesFileMetadata>, Error.<FilesUploadErrorWithProperties>>}
-   */
-
-
-  routes.filesAlphaUpload = function (arg) {
-    return this.request('files/alpha/upload', arg, 'user', 'content', 'upload');
-  };
-  /**
-   * Copy a file or folder to a different location in the user's Dropbox. If the
-   * source path is a folder all its contents will be copied.
-   * @function Dropbox#filesCopyV2
-   * @arg {FilesRelocationArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesRelocationResult>, Error.<FilesRelocationError>>}
-   */
-
-
-  routes.filesCopyV2 = function (arg) {
-    return this.request('files/copy_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Copy a file or folder to a different location in the user's Dropbox. If the
-   * source path is a folder all its contents will be copied.
-   * @function Dropbox#filesCopy
-   * @deprecated
-   * @arg {FilesRelocationArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<(FilesFileMetadata|FilesFolderMetadata|FilesDeletedMetadata)>, Error.<FilesRelocationError>>}
-   */
-
-
-  routes.filesCopy = function (arg) {
-    return this.request('files/copy', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Copy multiple files or folders to different locations at once in the user's
-   * Dropbox. This route will replace copy_batch. The main difference is this
-   * route will return status for each entry, while copy_batch raises failure if
-   * any entry fails. This route will either finish synchronously, or return a job
-   * ID and do the async copy job in background. Please use copy_batch/check_v2 to
-   * check the job status.
-   * @function Dropbox#filesCopyBatchV2
-   * @arg {Object} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesRelocationBatchV2Launch>, Error.<void>>}
-   */
-
-
-  routes.filesCopyBatchV2 = function (arg) {
-    return this.request('files/copy_batch_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Copy multiple files or folders to different locations at once in the user's
-   * Dropbox. This route will return job ID immediately and do the async copy job
-   * in background. Please use copy_batch/check to check the job status.
-   * @function Dropbox#filesCopyBatch
-   * @deprecated
-   * @arg {FilesRelocationBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesRelocationBatchLaunch>, Error.<void>>}
-   */
-
-
-  routes.filesCopyBatch = function (arg) {
-    return this.request('files/copy_batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job for copy_batch_v2. It returns list
-   * of results for each entry.
-   * @function Dropbox#filesCopyBatchCheckV2
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesRelocationBatchV2JobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.filesCopyBatchCheckV2 = function (arg) {
-    return this.request('files/copy_batch/check_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job for copy_batch. If success, it
-   * returns list of results for each entry.
-   * @function Dropbox#filesCopyBatchCheck
-   * @deprecated
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesRelocationBatchJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.filesCopyBatchCheck = function (arg) {
-    return this.request('files/copy_batch/check', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get a copy reference to a file or folder. This reference string can be used
-   * to save that file or folder to another user's Dropbox by passing it to
-   * copy_reference/save.
-   * @function Dropbox#filesCopyReferenceGet
-   * @arg {FilesGetCopyReferenceArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesGetCopyReferenceResult>, Error.<FilesGetCopyReferenceError>>}
-   */
-
-
-  routes.filesCopyReferenceGet = function (arg) {
-    return this.request('files/copy_reference/get', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Save a copy reference returned by copy_reference/get to the user's Dropbox.
-   * @function Dropbox#filesCopyReferenceSave
-   * @arg {FilesSaveCopyReferenceArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesSaveCopyReferenceResult>, Error.<FilesSaveCopyReferenceError>>}
-   */
-
-
-  routes.filesCopyReferenceSave = function (arg) {
-    return this.request('files/copy_reference/save', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Create a folder at a given path.
-   * @function Dropbox#filesCreateFolderV2
-   * @arg {FilesCreateFolderArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesCreateFolderResult>, Error.<FilesCreateFolderError>>}
-   */
-
-
-  routes.filesCreateFolderV2 = function (arg) {
-    return this.request('files/create_folder_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Create a folder at a given path.
-   * @function Dropbox#filesCreateFolder
-   * @deprecated
-   * @arg {FilesCreateFolderArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesFolderMetadata>, Error.<FilesCreateFolderError>>}
-   */
-
-
-  routes.filesCreateFolder = function (arg) {
-    return this.request('files/create_folder', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Create multiple folders at once. This route is asynchronous for large
-   * batches, which returns a job ID immediately and runs the create folder batch
-   * asynchronously. Otherwise, creates the folders and returns the result
-   * synchronously for smaller inputs. You can force asynchronous behaviour by
-   * using the CreateFolderBatchArg.force_async flag.  Use
-   * create_folder_batch/check to check the job status.
-   * @function Dropbox#filesCreateFolderBatch
-   * @arg {FilesCreateFolderBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesCreateFolderBatchLaunch>, Error.<void>>}
-   */
-
-
-  routes.filesCreateFolderBatch = function (arg) {
-    return this.request('files/create_folder_batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job for create_folder_batch. If
-   * success, it returns list of result for each entry.
-   * @function Dropbox#filesCreateFolderBatchCheck
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesCreateFolderBatchJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.filesCreateFolderBatchCheck = function (arg) {
-    return this.request('files/create_folder_batch/check', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Delete the file or folder at a given path. If the path is a folder, all its
-   * contents will be deleted too. A successful response indicates that the file
-   * or folder was deleted. The returned metadata will be the corresponding
-   * FileMetadata or FolderMetadata for the item at time of deletion, and not a
-   * DeletedMetadata object.
-   * @function Dropbox#filesDeleteV2
-   * @arg {FilesDeleteArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesDeleteResult>, Error.<FilesDeleteError>>}
-   */
-
-
-  routes.filesDeleteV2 = function (arg) {
-    return this.request('files/delete_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Delete the file or folder at a given path. If the path is a folder, all its
-   * contents will be deleted too. A successful response indicates that the file
-   * or folder was deleted. The returned metadata will be the corresponding
-   * FileMetadata or FolderMetadata for the item at time of deletion, and not a
-   * DeletedMetadata object.
-   * @function Dropbox#filesDelete
-   * @deprecated
-   * @arg {FilesDeleteArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<(FilesFileMetadata|FilesFolderMetadata|FilesDeletedMetadata)>, Error.<FilesDeleteError>>}
-   */
-
-
-  routes.filesDelete = function (arg) {
-    return this.request('files/delete', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Delete multiple files/folders at once. This route is asynchronous, which
-   * returns a job ID immediately and runs the delete batch asynchronously. Use
-   * delete_batch/check to check the job status.
-   * @function Dropbox#filesDeleteBatch
-   * @arg {FilesDeleteBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesDeleteBatchLaunch>, Error.<void>>}
-   */
-
-
-  routes.filesDeleteBatch = function (arg) {
-    return this.request('files/delete_batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job for delete_batch. If success, it
-   * returns list of result for each entry.
-   * @function Dropbox#filesDeleteBatchCheck
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesDeleteBatchJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.filesDeleteBatchCheck = function (arg) {
-    return this.request('files/delete_batch/check', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Download a file from a user's Dropbox.
-   * @function Dropbox#filesDownload
-   * @arg {FilesDownloadArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesFileMetadata>, Error.<FilesDownloadError>>}
-   */
-
-
-  routes.filesDownload = function (arg) {
-    return this.request('files/download', arg, 'user', 'content', 'download');
-  };
-  /**
-   * Download a folder from the user's Dropbox, as a zip file. The folder must be
-   * less than 20 GB in size and any single file within must be less than 4 GB in
-   * size. The resulting zip must have fewer than 10,000 total file and folder
-   * entries, including the top level folder. The input cannot be a single file.
-   * @function Dropbox#filesDownloadZip
-   * @arg {FilesDownloadZipArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesDownloadZipResult>, Error.<FilesDownloadZipError>>}
-   */
-
-
-  routes.filesDownloadZip = function (arg) {
-    return this.request('files/download_zip', arg, 'user', 'content', 'download');
-  };
-  /**
-   * Export a file from a user's Dropbox. This route only supports exporting files
-   * that cannot be downloaded directly  and whose ExportResult.file_metadata has
-   * ExportInfo.export_as populated.
-   * @function Dropbox#filesExport
-   * @arg {FilesExportArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesExportResult>, Error.<FilesExportError>>}
-   */
-
-
-  routes.filesExport = function (arg) {
-    return this.request('files/export', arg, 'user', 'content', 'download');
-  };
-  /**
-   * Return the lock metadata for the given list of paths.
-   * @function Dropbox#filesGetFileLockBatch
-   * @arg {FilesLockFileBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesLockFileBatchResult>, Error.<FilesLockFileError>>}
-   */
-
-
-  routes.filesGetFileLockBatch = function (arg) {
-    return this.request('files/get_file_lock_batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the metadata for a file or folder. Note: Metadata for the root folder
-   * is unsupported.
-   * @function Dropbox#filesGetMetadata
-   * @arg {FilesGetMetadataArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<(FilesFileMetadata|FilesFolderMetadata|FilesDeletedMetadata)>, Error.<FilesGetMetadataError>>}
-   */
-
-
-  routes.filesGetMetadata = function (arg) {
-    return this.request('files/get_metadata', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get a preview for a file. Currently, PDF previews are generated for files
-   * with the following extensions: .ai, .doc, .docm, .docx, .eps, .gdoc,
-   * .gslides, .odp, .odt, .pps, .ppsm, .ppsx, .ppt, .pptm, .pptx, .rtf. HTML
-   * previews are generated for files with the following extensions: .csv, .ods,
-   * .xls, .xlsm, .gsheet, .xlsx. Other formats will return an unsupported
-   * extension error.
-   * @function Dropbox#filesGetPreview
-   * @arg {FilesPreviewArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesFileMetadata>, Error.<FilesPreviewError>>}
-   */
-
-
-  routes.filesGetPreview = function (arg) {
-    return this.request('files/get_preview', arg, 'user', 'content', 'download');
-  };
-  /**
-   * Get a temporary link to stream content of a file. This link will expire in
-   * four hours and afterwards you will get 410 Gone. This URL should not be used
-   * to display content directly in the browser. The Content-Type of the link is
-   * determined automatically by the file's mime type.
-   * @function Dropbox#filesGetTemporaryLink
-   * @arg {FilesGetTemporaryLinkArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesGetTemporaryLinkResult>, Error.<FilesGetTemporaryLinkError>>}
-   */
-
-
-  routes.filesGetTemporaryLink = function (arg) {
-    return this.request('files/get_temporary_link', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get a one-time use temporary upload link to upload a file to a Dropbox
-   * location.  This endpoint acts as a delayed upload. The returned temporary
-   * upload link may be used to make a POST request with the data to be uploaded.
-   * The upload will then be perfomed with the CommitInfo previously provided to
-   * get_temporary_upload_link but evaluated only upon consumption. Hence, errors
-   * stemming from invalid CommitInfo with respect to the state of the user's
-   * Dropbox will only be communicated at consumption time. Additionally, these
-   * errors are surfaced as generic HTTP 409 Conflict responses, potentially
-   * hiding issue details. The maximum temporary upload link duration is 4 hours.
-   * Upon consumption or expiration, a new link will have to be generated.
-   * Multiple links may exist for a specific upload path at any given time.  The
-   * POST request on the temporary upload link must have its Content-Type set to
-   * "application/octet-stream".  Example temporary upload link consumption
-   * request:  curl -X POST
-   * https://content.dropboxapi.com/apitul/1/bNi2uIYF51cVBND --header
-   * "Content-Type: application/octet-stream" --data-binary @local_file.txt  A
-   * successful temporary upload link consumption request returns the content hash
-   * of the uploaded data in JSON format.  Example succesful temporary upload link
-   * consumption response: {"content-hash":
-   * "599d71033d700ac892a0e48fa61b125d2f5994"}  An unsuccessful temporary upload
-   * link consumption request returns any of the following status codes:  HTTP 400
-   * Bad Request: Content-Type is not one of application/octet-stream and
-   * text/plain or request is invalid. HTTP 409 Conflict: The temporary upload
-   * link does not exist or is currently unavailable, the upload failed, or
-   * another error happened. HTTP 410 Gone: The temporary upload link is expired
-   * or consumed.  Example unsuccessful temporary upload link consumption
-   * response: Temporary upload link has been recently consumed.
-   * @function Dropbox#filesGetTemporaryUploadLink
-   * @arg {FilesGetTemporaryUploadLinkArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesGetTemporaryUploadLinkResult>, Error.<void>>}
-   */
-
-
-  routes.filesGetTemporaryUploadLink = function (arg) {
-    return this.request('files/get_temporary_upload_link', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get a thumbnail for an image. This method currently supports files with the
-   * following file extensions: jpg, jpeg, png, tiff, tif, gif, webp, ppm and bmp.
-   * Photos that are larger than 20MB in size won't be converted to a thumbnail.
-   * @function Dropbox#filesGetThumbnail
-   * @arg {FilesThumbnailArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesFileMetadata>, Error.<FilesThumbnailError>>}
-   */
-
-
-  routes.filesGetThumbnail = function (arg) {
-    return this.request('files/get_thumbnail', arg, 'user', 'content', 'download');
-  };
-  /**
-   * Get a thumbnail for an image. This method currently supports files with the
-   * following file extensions: jpg, jpeg, png, tiff, tif, gif, webp, ppm and bmp.
-   * Photos that are larger than 20MB in size won't be converted to a thumbnail.
-   * @function Dropbox#filesGetThumbnailV2
-   * @arg {FilesThumbnailV2Arg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesPreviewResult>, Error.<FilesThumbnailV2Error>>}
-   */
-
-
-  routes.filesGetThumbnailV2 = function (arg) {
-    return this.request('files/get_thumbnail_v2', arg, 'app, user', 'content', 'download');
-  };
-  /**
-   * Get thumbnails for a list of images. We allow up to 25 thumbnails in a single
-   * batch. This method currently supports files with the following file
-   * extensions: jpg, jpeg, png, tiff, tif, gif, webp, ppm and bmp. Photos that
-   * are larger than 20MB in size won't be converted to a thumbnail.
-   * @function Dropbox#filesGetThumbnailBatch
-   * @arg {FilesGetThumbnailBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesGetThumbnailBatchResult>, Error.<FilesGetThumbnailBatchError>>}
-   */
-
-
-  routes.filesGetThumbnailBatch = function (arg) {
-    return this.request('files/get_thumbnail_batch', arg, 'user', 'content', 'rpc');
-  };
-  /**
-   * Starts returning the contents of a folder. If the result's
-   * ListFolderResult.has_more field is true, call list_folder/continue with the
-   * returned ListFolderResult.cursor to retrieve more entries. If you're using
-   * ListFolderArg.recursive set to true to keep a local cache of the contents of
-   * a Dropbox account, iterate through each entry in order and process them as
-   * follows to keep your local state in sync: For each FileMetadata, store the
-   * new entry at the given path in your local state. If the required parent
-   * folders don't exist yet, create them. If there's already something else at
-   * the given path, replace it and remove all its children. For each
-   * FolderMetadata, store the new entry at the given path in your local state. If
-   * the required parent folders don't exist yet, create them. If there's already
-   * something else at the given path, replace it but leave the children as they
-   * are. Check the new entry's FolderSharingInfo.read_only and set all its
-   * children's read-only statuses to match. For each DeletedMetadata, if your
-   * local state has something at the given path, remove it and all its children.
-   * If there's nothing at the given path, ignore this entry. Note:
-   * auth.RateLimitError may be returned if multiple list_folder or
-   * list_folder/continue calls with same parameters are made simultaneously by
-   * same API app for same user. If your app implements retry logic, please hold
-   * off the retry until the previous request finishes.
-   * @function Dropbox#filesListFolder
-   * @arg {FilesListFolderArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesListFolderResult>, Error.<FilesListFolderError>>}
-   */
-
-
-  routes.filesListFolder = function (arg) {
-    return this.request('files/list_folder', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from list_folder, use this to paginate
-   * through all files and retrieve updates to the folder, following the same
-   * rules as documented for list_folder.
-   * @function Dropbox#filesListFolderContinue
-   * @arg {FilesListFolderContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesListFolderResult>, Error.<FilesListFolderContinueError>>}
-   */
-
-
-  routes.filesListFolderContinue = function (arg) {
-    return this.request('files/list_folder/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * A way to quickly get a cursor for the folder's state. Unlike list_folder,
-   * list_folder/get_latest_cursor doesn't return any entries. This endpoint is
-   * for app which only needs to know about new files and modifications and
-   * doesn't need to know about files that already exist in Dropbox.
-   * @function Dropbox#filesListFolderGetLatestCursor
-   * @arg {FilesListFolderArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesListFolderGetLatestCursorResult>, Error.<FilesListFolderError>>}
-   */
-
-
-  routes.filesListFolderGetLatestCursor = function (arg) {
-    return this.request('files/list_folder/get_latest_cursor', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * A longpoll endpoint to wait for changes on an account. In conjunction with
-   * list_folder/continue, this call gives you a low-latency way to monitor an
-   * account for file changes. The connection will block until there are changes
-   * available or a timeout occurs. This endpoint is useful mostly for client-side
-   * apps. If you're looking for server-side notifications, check out our webhooks
-   * documentation https://www.dropbox.com/developers/reference/webhooks.
-   * @function Dropbox#filesListFolderLongpoll
-   * @arg {FilesListFolderLongpollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesListFolderLongpollResult>, Error.<FilesListFolderLongpollError>>}
-   */
-
-
-  routes.filesListFolderLongpoll = function (arg) {
-    return this.request('files/list_folder/longpoll', arg, 'noauth', 'notify', 'rpc');
-  };
-  /**
-   * Returns revisions for files based on a file path or a file id. The file path
-   * or file id is identified from the latest file entry at the given file path or
-   * id. This end point allows your app to query either by file path or file id by
-   * setting the mode parameter appropriately. In the ListRevisionsMode.path
-   * (default) mode, all revisions at the same file path as the latest file entry
-   * are returned. If revisions with the same file id are desired, then mode must
-   * be set to ListRevisionsMode.id. The ListRevisionsMode.id mode is useful to
-   * retrieve revisions for a given file across moves or renames.
-   * @function Dropbox#filesListRevisions
-   * @arg {FilesListRevisionsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesListRevisionsResult>, Error.<FilesListRevisionsError>>}
-   */
-
-
-  routes.filesListRevisions = function (arg) {
-    return this.request('files/list_revisions', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Lock the files at the given paths. A locked file will be writable only by the
-   * lock holder. A successful response indicates that the file has been locked.
-   * Returns a list of the locked file paths and their metadata after this
-   * operation.
-   * @function Dropbox#filesLockFileBatch
-   * @arg {FilesLockFileBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesLockFileBatchResult>, Error.<FilesLockFileError>>}
-   */
-
-
-  routes.filesLockFileBatch = function (arg) {
-    return this.request('files/lock_file_batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Move a file or folder to a different location in the user's Dropbox. If the
-   * source path is a folder all its contents will be moved. Note that we do not
-   * currently support case-only renaming.
-   * @function Dropbox#filesMoveV2
-   * @arg {FilesRelocationArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesRelocationResult>, Error.<FilesRelocationError>>}
-   */
-
-
-  routes.filesMoveV2 = function (arg) {
-    return this.request('files/move_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Move a file or folder to a different location in the user's Dropbox. If the
-   * source path is a folder all its contents will be moved.
-   * @function Dropbox#filesMove
-   * @deprecated
-   * @arg {FilesRelocationArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<(FilesFileMetadata|FilesFolderMetadata|FilesDeletedMetadata)>, Error.<FilesRelocationError>>}
-   */
-
-
-  routes.filesMove = function (arg) {
-    return this.request('files/move', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Move multiple files or folders to different locations at once in the user's
-   * Dropbox. Note that we do not currently support case-only renaming. This route
-   * will replace move_batch. The main difference is this route will return status
-   * for each entry, while move_batch raises failure if any entry fails. This
-   * route will either finish synchronously, or return a job ID and do the async
-   * move job in background. Please use move_batch/check_v2 to check the job
-   * status.
-   * @function Dropbox#filesMoveBatchV2
-   * @arg {FilesMoveBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesRelocationBatchV2Launch>, Error.<void>>}
-   */
-
-
-  routes.filesMoveBatchV2 = function (arg) {
-    return this.request('files/move_batch_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Move multiple files or folders to different locations at once in the user's
-   * Dropbox. This route will return job ID immediately and do the async moving
-   * job in background. Please use move_batch/check to check the job status.
-   * @function Dropbox#filesMoveBatch
-   * @deprecated
-   * @arg {FilesRelocationBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesRelocationBatchLaunch>, Error.<void>>}
-   */
-
-
-  routes.filesMoveBatch = function (arg) {
-    return this.request('files/move_batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job for move_batch_v2. It returns list
-   * of results for each entry.
-   * @function Dropbox#filesMoveBatchCheckV2
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesRelocationBatchV2JobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.filesMoveBatchCheckV2 = function (arg) {
-    return this.request('files/move_batch/check_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job for move_batch. If success, it
-   * returns list of results for each entry.
-   * @function Dropbox#filesMoveBatchCheck
-   * @deprecated
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesRelocationBatchJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.filesMoveBatchCheck = function (arg) {
-    return this.request('files/move_batch/check', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Creates a new Paper doc with the provided content.
-   * @function Dropbox#filesPaperCreate
-   * @arg {FilesPaperCreateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesPaperCreateResult>, Error.<FilesPaperCreateError>>}
-   */
-
-
-  routes.filesPaperCreate = function (arg) {
-    return this.request('files/paper/create', arg, 'user', 'api', 'upload');
-  };
-  /**
-   * Updates an existing Paper doc with the provided content.
-   * @function Dropbox#filesPaperUpdate
-   * @arg {FilesPaperUpdateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesPaperUpdateResult>, Error.<FilesPaperUpdateError>>}
-   */
-
-
-  routes.filesPaperUpdate = function (arg) {
-    return this.request('files/paper/update', arg, 'user', 'api', 'upload');
-  };
-  /**
-   * Permanently delete the file or folder at a given path (see
-   * https://www.dropbox.com/en/help/40). If the given file or folder is not yet
-   * deleted, this route will first delete it. It is possible for this route to
-   * successfully delete, then fail to permanently delete. Note: This endpoint is
-   * only available for Dropbox Business apps.
-   * @function Dropbox#filesPermanentlyDelete
-   * @arg {FilesDeleteArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilesDeleteError>>}
-   */
-
-
-  routes.filesPermanentlyDelete = function (arg) {
-    return this.request('files/permanently_delete', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * @function Dropbox#filesPropertiesAdd
-   * @deprecated
-   * @arg {FilePropertiesAddPropertiesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilePropertiesAddPropertiesError>>}
-   */
-
-
-  routes.filesPropertiesAdd = function (arg) {
-    return this.request('files/properties/add', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * @function Dropbox#filesPropertiesOverwrite
-   * @deprecated
-   * @arg {FilePropertiesOverwritePropertyGroupArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilePropertiesInvalidPropertyGroupError>>}
-   */
-
-
-  routes.filesPropertiesOverwrite = function (arg) {
-    return this.request('files/properties/overwrite', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * @function Dropbox#filesPropertiesRemove
-   * @deprecated
-   * @arg {FilePropertiesRemovePropertiesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilePropertiesRemovePropertiesError>>}
-   */
-
-
-  routes.filesPropertiesRemove = function (arg) {
-    return this.request('files/properties/remove', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * @function Dropbox#filesPropertiesTemplateGet
-   * @deprecated
-   * @arg {FilePropertiesGetTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesGetTemplateResult>, Error.<FilePropertiesTemplateError>>}
-   */
-
-
-  routes.filesPropertiesTemplateGet = function (arg) {
-    return this.request('files/properties/template/get', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * @function Dropbox#filesPropertiesTemplateList
-   * @deprecated
-   * @returns {Promise.<DropboxResponse<FilePropertiesListTemplateResult>, Error.<FilePropertiesTemplateError>>}
-   */
-
-
-  routes.filesPropertiesTemplateList = function () {
-    return this.request('files/properties/template/list', null, 'user', 'api', 'rpc');
-  };
-  /**
-   * @function Dropbox#filesPropertiesUpdate
-   * @deprecated
-   * @arg {FilePropertiesUpdatePropertiesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilePropertiesUpdatePropertiesError>>}
-   */
-
-
-  routes.filesPropertiesUpdate = function (arg) {
-    return this.request('files/properties/update', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Restore a specific revision of a file to the given path.
-   * @function Dropbox#filesRestore
-   * @arg {FilesRestoreArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesFileMetadata>, Error.<FilesRestoreError>>}
-   */
-
-
-  routes.filesRestore = function (arg) {
-    return this.request('files/restore', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Save the data from a specified URL into a file in user's Dropbox. Note that
-   * the transfer from the URL must complete within 5 minutes, or the operation
-   * will time out and the job will fail. If the given path already exists, the
-   * file will be renamed to avoid the conflict (e.g. myfile (1).txt).
-   * @function Dropbox#filesSaveUrl
-   * @arg {FilesSaveUrlArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesSaveUrlResult>, Error.<FilesSaveUrlError>>}
-   */
-
-
-  routes.filesSaveUrl = function (arg) {
-    return this.request('files/save_url', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Check the status of a save_url job.
-   * @function Dropbox#filesSaveUrlCheckJobStatus
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesSaveUrlJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.filesSaveUrlCheckJobStatus = function (arg) {
-    return this.request('files/save_url/check_job_status', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Searches for files and folders. Note: Recent changes will be reflected in
-   * search results within a few seconds and older revisions of existing files may
-   * still match your query for up to a few days.
-   * @function Dropbox#filesSearch
-   * @deprecated
-   * @arg {FilesSearchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesSearchResult>, Error.<FilesSearchError>>}
-   */
-
-
-  routes.filesSearch = function (arg) {
-    return this.request('files/search', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Searches for files and folders. Note: search_v2 along with search/continue_v2
-   * can only be used to retrieve a maximum of 10,000 matches. Recent changes may
-   * not immediately be reflected in search results due to a short delay in
-   * indexing. Duplicate results may be returned across pages. Some results may
-   * not be returned.
-   * @function Dropbox#filesSearchV2
-   * @arg {FilesSearchV2Arg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesSearchV2Result>, Error.<FilesSearchError>>}
-   */
-
-
-  routes.filesSearchV2 = function (arg) {
-    return this.request('files/search_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Fetches the next page of search results returned from search_v2. Note:
-   * search_v2 along with search/continue_v2 can only be used to retrieve a
-   * maximum of 10,000 matches. Recent changes may not immediately be reflected in
-   * search results due to a short delay in indexing. Duplicate results may be
-   * returned across pages. Some results may not be returned.
-   * @function Dropbox#filesSearchContinueV2
-   * @arg {FilesSearchV2ContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesSearchV2Result>, Error.<FilesSearchError>>}
-   */
-
-
-  routes.filesSearchContinueV2 = function (arg) {
-    return this.request('files/search/continue_v2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Unlock the files at the given paths. A locked file can only be unlocked by
-   * the lock holder or, if a business account, a team admin. A successful
-   * response indicates that the file has been unlocked. Returns a list of the
-   * unlocked file paths and their metadata after this operation.
-   * @function Dropbox#filesUnlockFileBatch
-   * @arg {FilesUnlockFileBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesLockFileBatchResult>, Error.<FilesLockFileError>>}
-   */
-
-
-  routes.filesUnlockFileBatch = function (arg) {
-    return this.request('files/unlock_file_batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Create a new file with the contents provided in the request. Do not use this
-   * to upload a file larger than 150 MB. Instead, create an upload session with
-   * upload_session/start. Calls to this endpoint will count as data transport
-   * calls for any Dropbox Business teams with a limit on the number of data
-   * transport calls allowed per month. For more information, see the Data
-   * transport limit page
-   * https://www.dropbox.com/developers/reference/data-transport-limit.
-   * @function Dropbox#filesUpload
-   * @arg {FilesCommitInfo} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesFileMetadata>, Error.<FilesUploadError>>}
-   */
-
-
-  routes.filesUpload = function (arg) {
-    return this.request('files/upload', arg, 'user', 'content', 'upload');
-  };
-  /**
-   * Append more data to an upload session. When the parameter close is set, this
-   * call will close the session. A single request should not upload more than 150
-   * MB. The maximum size of a file one can upload to an upload session is 350 GB.
-   * Calls to this endpoint will count as data transport calls for any Dropbox
-   * Business teams with a limit on the number of data transport calls allowed per
-   * month. For more information, see the Data transport limit page
-   * https://www.dropbox.com/developers/reference/data-transport-limit.
-   * @function Dropbox#filesUploadSessionAppendV2
-   * @arg {FilesUploadSessionAppendArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilesUploadSessionLookupError>>}
-   */
-
-
-  routes.filesUploadSessionAppendV2 = function (arg) {
-    return this.request('files/upload_session/append_v2', arg, 'user', 'content', 'upload');
-  };
-  /**
-   * Append more data to an upload session. A single request should not upload
-   * more than 150 MB. The maximum size of a file one can upload to an upload
-   * session is 350 GB. Calls to this endpoint will count as data transport calls
-   * for any Dropbox Business teams with a limit on the number of data transport
-   * calls allowed per month. For more information, see the Data transport limit
-   * page https://www.dropbox.com/developers/reference/data-transport-limit.
-   * @function Dropbox#filesUploadSessionAppend
-   * @deprecated
-   * @arg {FilesUploadSessionCursor} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<FilesUploadSessionLookupError>>}
-   */
-
-
-  routes.filesUploadSessionAppend = function (arg) {
-    return this.request('files/upload_session/append', arg, 'user', 'content', 'upload');
-  };
-  /**
-   * Finish an upload session and save the uploaded data to the given file path. A
-   * single request should not upload more than 150 MB. The maximum size of a file
-   * one can upload to an upload session is 350 GB. Calls to this endpoint will
-   * count as data transport calls for any Dropbox Business teams with a limit on
-   * the number of data transport calls allowed per month. For more information,
-   * see the Data transport limit page
-   * https://www.dropbox.com/developers/reference/data-transport-limit.
-   * @function Dropbox#filesUploadSessionFinish
-   * @arg {FilesUploadSessionFinishArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesFileMetadata>, Error.<FilesUploadSessionFinishError>>}
-   */
-
-
-  routes.filesUploadSessionFinish = function (arg) {
-    return this.request('files/upload_session/finish', arg, 'user', 'content', 'upload');
-  };
-  /**
-   * This route helps you commit many files at once into a user's Dropbox. Use
-   * upload_session/start and upload_session/append_v2 to upload file contents. We
-   * recommend uploading many files in parallel to increase throughput. Once the
-   * file contents have been uploaded, rather than calling upload_session/finish,
-   * use this route to finish all your upload sessions in a single request.
-   * UploadSessionStartArg.close or UploadSessionAppendArg.close needs to be true
-   * for the last upload_session/start or upload_session/append_v2 call. The
-   * maximum size of a file one can upload to an upload session is 350 GB. This
-   * route will return a job_id immediately and do the async commit job in
-   * background. Use upload_session/finish_batch/check to check the job status.
-   * For the same account, this route should be executed serially. That means you
-   * should not start the next job before current job finishes. We allow up to
-   * 1000 entries in a single request. Calls to this endpoint will count as data
-   * transport calls for any Dropbox Business teams with a limit on the number of
-   * data transport calls allowed per month. For more information, see the Data
-   * transport limit page
-   * https://www.dropbox.com/developers/reference/data-transport-limit.
-   * @function Dropbox#filesUploadSessionFinishBatch
-   * @arg {FilesUploadSessionFinishBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesUploadSessionFinishBatchLaunch>, Error.<void>>}
-   */
-
-
-  routes.filesUploadSessionFinishBatch = function (arg) {
-    return this.request('files/upload_session/finish_batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job for upload_session/finish_batch. If
-   * success, it returns list of result for each entry.
-   * @function Dropbox#filesUploadSessionFinishBatchCheck
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesUploadSessionFinishBatchJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.filesUploadSessionFinishBatchCheck = function (arg) {
-    return this.request('files/upload_session/finish_batch/check', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Upload sessions allow you to upload a single file in one or more requests,
-   * for example where the size of the file is greater than 150 MB.  This call
-   * starts a new upload session with the given data. You can then use
-   * upload_session/append_v2 to add more data and upload_session/finish to save
-   * all the data to a file in Dropbox. A single request should not upload more
-   * than 150 MB. The maximum size of a file one can upload to an upload session
-   * is 350 GB. An upload session can be used for a maximum of 7 days. Attempting
-   * to use an UploadSessionStartResult.session_id with upload_session/append_v2
-   * or upload_session/finish more than 7 days after its creation will return a
-   * UploadSessionLookupError.not_found. Calls to this endpoint will count as data
-   * transport calls for any Dropbox Business teams with a limit on the number of
-   * data transport calls allowed per month. For more information, see the Data
-   * transport limit page
-   * https://www.dropbox.com/developers/reference/data-transport-limit. By
-   * default, upload sessions require you to send content of the file in
-   * sequential order via consecutive upload_session/start,
-   * upload_session/append_v2, upload_session/finish calls. For better
-   * performance, you can instead optionally use a UploadSessionType.concurrent
-   * upload session. To start a new concurrent session, set
-   * UploadSessionStartArg.session_type to UploadSessionType.concurrent. After
-   * that, you can send file data in concurrent upload_session/append_v2 requests.
-   * Finally finish the session with upload_session/finish. There are couple of
-   * constraints with concurrent sessions to make them work. You can not send data
-   * with upload_session/start or upload_session/finish call, only with
-   * upload_session/append_v2 call. Also data uploaded in upload_session/append_v2
-   * call must be multiple of 4194304 bytes (except for last
-   * upload_session/append_v2 with UploadSessionStartArg.close to true, that may
-   * contain any remaining data).
-   * @function Dropbox#filesUploadSessionStart
-   * @arg {FilesUploadSessionStartArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilesUploadSessionStartResult>, Error.<FilesUploadSessionStartError>>}
-   */
-
-
-  routes.filesUploadSessionStart = function (arg) {
-    return this.request('files/upload_session/start', arg, 'user', 'content', 'upload');
-  };
-  /**
-   * Marks the given Paper doc as archived. This action can be performed or undone
-   * by anyone with edit permissions to the doc. Note that this endpoint will
-   * continue to work for content created by users on the older version of Paper.
-   * To check which version of Paper a user is on, use /users/features/get_values.
-   * If the paper_as_files feature is enabled, then the user is running the new
-   * version of Paper. This endpoint will be retired in September 2020. Refer to
-   * the Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * more information.
-   * @function Dropbox#paperDocsArchive
-   * @deprecated
-   * @arg {PaperRefPaperDoc} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<PaperDocLookupError>>}
-   */
-
-
-  routes.paperDocsArchive = function (arg) {
-    return this.request('paper/docs/archive', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Creates a new Paper doc with the provided content. Note that this endpoint
-   * will continue to work for content created by users on the older version of
-   * Paper. To check which version of Paper a user is on, use
-   * /users/features/get_values. If the paper_as_files feature is enabled, then
-   * the user is running the new version of Paper. This endpoint will be retired
-   * in September 2020. Refer to the Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * more information.
-   * @function Dropbox#paperDocsCreate
-   * @deprecated
-   * @arg {PaperPaperDocCreateArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperPaperDocCreateUpdateResult>, Error.<PaperPaperDocCreateError>>}
-   */
-
-
-  routes.paperDocsCreate = function (arg) {
-    return this.request('paper/docs/create', arg, 'user', 'api', 'upload');
-  };
-  /**
-   * Exports and downloads Paper doc either as HTML or markdown. Note that this
-   * endpoint will continue to work for content created by users on the older
-   * version of Paper. To check which version of Paper a user is on, use
-   * /users/features/get_values. If the paper_as_files feature is enabled, then
-   * the user is running the new version of Paper. Refer to the Paper Migration
-   * Guide https://www.dropbox.com/lp/developers/reference/paper-migration-guide
-   * for migration information.
-   * @function Dropbox#paperDocsDownload
-   * @deprecated
-   * @arg {PaperPaperDocExport} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperPaperDocExportResult>, Error.<PaperDocLookupError>>}
-   */
-
-
-  routes.paperDocsDownload = function (arg) {
-    return this.request('paper/docs/download', arg, 'user', 'api', 'download');
-  };
-  /**
-   * Lists the users who are explicitly invited to the Paper folder in which the
-   * Paper doc is contained. For private folders all users (including owner)
-   * shared on the folder are listed and for team folders all non-team users
-   * shared on the folder are returned. Note that this endpoint will continue to
-   * work for content created by users on the older version of Paper. To check
-   * which version of Paper a user is on, use /users/features/get_values. If the
-   * paper_as_files feature is enabled, then the user is running the new version
-   * of Paper. Refer to the Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * migration information.
-   * @function Dropbox#paperDocsFolderUsersList
-   * @deprecated
-   * @arg {PaperListUsersOnFolderArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperListUsersOnFolderResponse>, Error.<PaperDocLookupError>>}
-   */
-
-
-  routes.paperDocsFolderUsersList = function (arg) {
-    return this.request('paper/docs/folder_users/list', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from docs/folder_users/list, use this to
-   * paginate through all users on the Paper folder. Note that this endpoint will
-   * continue to work for content created by users on the older version of Paper.
-   * To check which version of Paper a user is on, use /users/features/get_values.
-   * If the paper_as_files feature is enabled, then the user is running the new
-   * version of Paper. Refer to the Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * migration information.
-   * @function Dropbox#paperDocsFolderUsersListContinue
-   * @deprecated
-   * @arg {PaperListUsersOnFolderContinueArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperListUsersOnFolderResponse>, Error.<PaperListUsersCursorError>>}
-   */
-
-
-  routes.paperDocsFolderUsersListContinue = function (arg) {
-    return this.request('paper/docs/folder_users/list/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Retrieves folder information for the given Paper doc. This includes:   -
-   * folder sharing policy; permissions for subfolders are set by the top-level
-   * folder.   - full 'filepath', i.e. the list of folders (both folderId and
-   * folderName) from     the root folder to the folder directly containing the
-   * Paper doc.  If the Paper doc is not in any folder (aka unfiled) the response
-   * will be empty. Note that this endpoint will continue to work for content
-   * created by users on the older version of Paper. To check which version of
-   * Paper a user is on, use /users/features/get_values. If the paper_as_files
-   * feature is enabled, then the user is running the new version of Paper. Refer
-   * to the Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * migration information.
-   * @function Dropbox#paperDocsGetFolderInfo
-   * @deprecated
-   * @arg {PaperRefPaperDoc} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperFoldersContainingPaperDoc>, Error.<PaperDocLookupError>>}
-   */
-
-
-  routes.paperDocsGetFolderInfo = function (arg) {
-    return this.request('paper/docs/get_folder_info', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Return the list of all Paper docs according to the argument specifications.
-   * To iterate over through the full pagination, pass the cursor to
-   * docs/list/continue. Note that this endpoint will continue to work for content
-   * created by users on the older version of Paper. To check which version of
-   * Paper a user is on, use /users/features/get_values. If the paper_as_files
-   * feature is enabled, then the user is running the new version of Paper. Refer
-   * to the Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * migration information.
-   * @function Dropbox#paperDocsList
-   * @deprecated
-   * @arg {PaperListPaperDocsArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperListPaperDocsResponse>, Error.<void>>}
-   */
-
-
-  routes.paperDocsList = function (arg) {
-    return this.request('paper/docs/list', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from docs/list, use this to paginate through
-   * all Paper doc. Note that this endpoint will continue to work for content
-   * created by users on the older version of Paper. To check which version of
-   * Paper a user is on, use /users/features/get_values. If the paper_as_files
-   * feature is enabled, then the user is running the new version of Paper. Refer
-   * to the Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * migration information.
-   * @function Dropbox#paperDocsListContinue
-   * @deprecated
-   * @arg {PaperListPaperDocsContinueArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperListPaperDocsResponse>, Error.<PaperListDocsCursorError>>}
-   */
-
-
-  routes.paperDocsListContinue = function (arg) {
-    return this.request('paper/docs/list/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Permanently deletes the given Paper doc. This operation is final as the doc
-   * cannot be recovered. This action can be performed only by the doc owner. Note
-   * that this endpoint will continue to work for content created by users on the
-   * older version of Paper. To check which version of Paper a user is on, use
-   * /users/features/get_values. If the paper_as_files feature is enabled, then
-   * the user is running the new version of Paper. Refer to the Paper Migration
-   * Guide https://www.dropbox.com/lp/developers/reference/paper-migration-guide
-   * for migration information.
-   * @function Dropbox#paperDocsPermanentlyDelete
-   * @deprecated
-   * @arg {PaperRefPaperDoc} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<PaperDocLookupError>>}
-   */
-
-
-  routes.paperDocsPermanentlyDelete = function (arg) {
-    return this.request('paper/docs/permanently_delete', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Gets the default sharing policy for the given Paper doc. Note that this
-   * endpoint will continue to work for content created by users on the older
-   * version of Paper. To check which version of Paper a user is on, use
-   * /users/features/get_values. If the paper_as_files feature is enabled, then
-   * the user is running the new version of Paper. Refer to the Paper Migration
-   * Guide https://www.dropbox.com/lp/developers/reference/paper-migration-guide
-   * for migration information.
-   * @function Dropbox#paperDocsSharingPolicyGet
-   * @deprecated
-   * @arg {PaperRefPaperDoc} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperSharingPolicy>, Error.<PaperDocLookupError>>}
-   */
-
-
-  routes.paperDocsSharingPolicyGet = function (arg) {
-    return this.request('paper/docs/sharing_policy/get', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Sets the default sharing policy for the given Paper doc. The default
-   * 'team_sharing_policy' can be changed only by teams, omit this field for
-   * personal accounts. The 'public_sharing_policy' policy can't be set to the
-   * value 'disabled' because this setting can be changed only via the team admin
-   * console. Note that this endpoint will continue to work for content created by
-   * users on the older version of Paper. To check which version of Paper a user
-   * is on, use /users/features/get_values. If the paper_as_files feature is
-   * enabled, then the user is running the new version of Paper. Refer to the
-   * Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * migration information.
-   * @function Dropbox#paperDocsSharingPolicySet
-   * @deprecated
-   * @arg {PaperPaperDocSharingPolicy} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<PaperDocLookupError>>}
-   */
-
-
-  routes.paperDocsSharingPolicySet = function (arg) {
-    return this.request('paper/docs/sharing_policy/set', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Updates an existing Paper doc with the provided content. Note that this
-   * endpoint will continue to work for content created by users on the older
-   * version of Paper. To check which version of Paper a user is on, use
-   * /users/features/get_values. If the paper_as_files feature is enabled, then
-   * the user is running the new version of Paper. This endpoint will be retired
-   * in September 2020. Refer to the Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * more information.
-   * @function Dropbox#paperDocsUpdate
-   * @deprecated
-   * @arg {PaperPaperDocUpdateArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperPaperDocCreateUpdateResult>, Error.<PaperPaperDocUpdateError>>}
-   */
-
-
-  routes.paperDocsUpdate = function (arg) {
-    return this.request('paper/docs/update', arg, 'user', 'api', 'upload');
-  };
-  /**
-   * Allows an owner or editor to add users to a Paper doc or change their
-   * permissions using their email address or Dropbox account ID. The doc owner's
-   * permissions cannot be changed. Note that this endpoint will continue to work
-   * for content created by users on the older version of Paper. To check which
-   * version of Paper a user is on, use /users/features/get_values. If the
-   * paper_as_files feature is enabled, then the user is running the new version
-   * of Paper. Refer to the Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * migration information.
-   * @function Dropbox#paperDocsUsersAdd
-   * @deprecated
-   * @arg {PaperAddPaperDocUser} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Array.<PaperAddPaperDocUserMemberResult>>, Error.<PaperDocLookupError>>}
-   */
-
-
-  routes.paperDocsUsersAdd = function (arg) {
-    return this.request('paper/docs/users/add', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Lists all users who visited the Paper doc or users with explicit access. This
-   * call excludes users who have been removed. The list is sorted by the date of
-   * the visit or the share date. The list will include both users, the explicitly
-   * shared ones as well as those who came in using the Paper url link. Note that
-   * this endpoint will continue to work for content created by users on the older
-   * version of Paper. To check which version of Paper a user is on, use
-   * /users/features/get_values. If the paper_as_files feature is enabled, then
-   * the user is running the new version of Paper. Refer to the Paper Migration
-   * Guide https://www.dropbox.com/lp/developers/reference/paper-migration-guide
-   * for migration information.
-   * @function Dropbox#paperDocsUsersList
-   * @deprecated
-   * @arg {PaperListUsersOnPaperDocArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperListUsersOnPaperDocResponse>, Error.<PaperDocLookupError>>}
-   */
-
-
-  routes.paperDocsUsersList = function (arg) {
-    return this.request('paper/docs/users/list', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from docs/users/list, use this to paginate
-   * through all users on the Paper doc. Note that this endpoint will continue to
-   * work for content created by users on the older version of Paper. To check
-   * which version of Paper a user is on, use /users/features/get_values. If the
-   * paper_as_files feature is enabled, then the user is running the new version
-   * of Paper. Refer to the Paper Migration Guide
-   * https://www.dropbox.com/lp/developers/reference/paper-migration-guide for
-   * migration information.
-   * @function Dropbox#paperDocsUsersListContinue
-   * @deprecated
-   * @arg {PaperListUsersOnPaperDocContinueArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperListUsersOnPaperDocResponse>, Error.<PaperListUsersCursorError>>}
-   */
-
-
-  routes.paperDocsUsersListContinue = function (arg) {
-    return this.request('paper/docs/users/list/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Allows an owner or editor to remove users from a Paper doc using their email
-   * address or Dropbox account ID. The doc owner cannot be removed. Note that
-   * this endpoint will continue to work for content created by users on the older
-   * version of Paper. To check which version of Paper a user is on, use
-   * /users/features/get_values. If the paper_as_files feature is enabled, then
-   * the user is running the new version of Paper. Refer to the Paper Migration
-   * Guide https://www.dropbox.com/lp/developers/reference/paper-migration-guide
-   * for migration information.
-   * @function Dropbox#paperDocsUsersRemove
-   * @deprecated
-   * @arg {PaperRemovePaperDocUser} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<PaperDocLookupError>>}
-   */
-
-
-  routes.paperDocsUsersRemove = function (arg) {
-    return this.request('paper/docs/users/remove', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Create a new Paper folder with the provided info. Note that this endpoint
-   * will continue to work for content created by users on the older version of
-   * Paper. To check which version of Paper a user is on, use
-   * /users/features/get_values. If the paper_as_files feature is enabled, then
-   * the user is running the new version of Paper. Refer to the Paper Migration
-   * Guide https://www.dropbox.com/lp/developers/reference/paper-migration-guide
-   * for migration information.
-   * @function Dropbox#paperFoldersCreate
-   * @deprecated
-   * @arg {PaperPaperFolderCreateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<PaperPaperFolderCreateResult>, Error.<PaperPaperFolderCreateError>>}
-   */
-
-
-  routes.paperFoldersCreate = function (arg) {
-    return this.request('paper/folders/create', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Adds specified members to a file.
-   * @function Dropbox#sharingAddFileMember
-   * @arg {SharingAddFileMemberArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Array.<SharingFileMemberActionResult>>, Error.<SharingAddFileMemberError>>}
-   */
-
-
-  routes.sharingAddFileMember = function (arg) {
-    return this.request('sharing/add_file_member', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Allows an owner or editor (if the ACL update policy allows) of a shared
-   * folder to add another member. For the new member to get access to all the
-   * functionality for this folder, you will need to call mount_folder on their
-   * behalf.
-   * @function Dropbox#sharingAddFolderMember
-   * @arg {SharingAddFolderMemberArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<SharingAddFolderMemberError>>}
-   */
-
-
-  routes.sharingAddFolderMember = function (arg) {
-    return this.request('sharing/add_folder_member', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Identical to update_file_member but with less information returned.
-   * @function Dropbox#sharingChangeFileMemberAccess
-   * @deprecated
-   * @arg {SharingChangeFileMemberAccessArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingFileMemberActionResult>, Error.<SharingFileMemberActionError>>}
-   */
-
-
-  routes.sharingChangeFileMemberAccess = function (arg) {
-    return this.request('sharing/change_file_member_access', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job.
-   * @function Dropbox#sharingCheckJobStatus
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.sharingCheckJobStatus = function (arg) {
-    return this.request('sharing/check_job_status', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job for sharing a folder.
-   * @function Dropbox#sharingCheckRemoveMemberJobStatus
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingRemoveMemberJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.sharingCheckRemoveMemberJobStatus = function (arg) {
-    return this.request('sharing/check_remove_member_job_status', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job for sharing a folder.
-   * @function Dropbox#sharingCheckShareJobStatus
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingShareFolderJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.sharingCheckShareJobStatus = function (arg) {
-    return this.request('sharing/check_share_job_status', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Create a shared link. If a shared link already exists for the given path,
-   * that link is returned. Note that in the returned PathLinkMetadata, the
-   * PathLinkMetadata.url field is the shortened URL if
-   * CreateSharedLinkArg.short_url argument is set to true. Previously, it was
-   * technically possible to break a shared link by moving or renaming the
-   * corresponding file or folder. In the future, this will no longer be the case,
-   * so your app shouldn't rely on this behavior. Instead, if your app needs to
-   * revoke a shared link, use revoke_shared_link.
-   * @function Dropbox#sharingCreateSharedLink
-   * @deprecated
-   * @arg {SharingCreateSharedLinkArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingPathLinkMetadata>, Error.<SharingCreateSharedLinkError>>}
-   */
-
-
-  routes.sharingCreateSharedLink = function (arg) {
-    return this.request('sharing/create_shared_link', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Create a shared link with custom settings. If no settings are given then the
-   * default visibility is RequestedVisibility.public (The resolved visibility,
-   * though, may depend on other aspects such as team and shared folder settings).
-   * @function Dropbox#sharingCreateSharedLinkWithSettings
-   * @arg {SharingCreateSharedLinkWithSettingsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<(SharingFileLinkMetadata|SharingFolderLinkMetadata|SharingSharedLinkMetadata)>, Error.<SharingCreateSharedLinkWithSettingsError>>}
-   */
-
-
-  routes.sharingCreateSharedLinkWithSettings = function (arg) {
-    return this.request('sharing/create_shared_link_with_settings', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns shared file metadata.
-   * @function Dropbox#sharingGetFileMetadata
-   * @arg {SharingGetFileMetadataArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingSharedFileMetadata>, Error.<SharingGetFileMetadataError>>}
-   */
-
-
-  routes.sharingGetFileMetadata = function (arg) {
-    return this.request('sharing/get_file_metadata', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns shared file metadata.
-   * @function Dropbox#sharingGetFileMetadataBatch
-   * @arg {SharingGetFileMetadataBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Array.<SharingGetFileMetadataBatchResult>>, Error.<SharingSharingUserError>>}
-   */
-
-
-  routes.sharingGetFileMetadataBatch = function (arg) {
-    return this.request('sharing/get_file_metadata/batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns shared folder metadata by its folder ID.
-   * @function Dropbox#sharingGetFolderMetadata
-   * @arg {SharingGetMetadataArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingSharedFolderMetadata>, Error.<SharingSharedFolderAccessError>>}
-   */
-
-
-  routes.sharingGetFolderMetadata = function (arg) {
-    return this.request('sharing/get_folder_metadata', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Download the shared link's file from a user's Dropbox.
-   * @function Dropbox#sharingGetSharedLinkFile
-   * @arg {Object} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<(SharingFileLinkMetadata|SharingFolderLinkMetadata|SharingSharedLinkMetadata)>, Error.<SharingGetSharedLinkFileError>>}
-   */
-
-
-  routes.sharingGetSharedLinkFile = function (arg) {
-    return this.request('sharing/get_shared_link_file', arg, 'user', 'content', 'download');
-  };
-  /**
-   * Get the shared link's metadata.
-   * @function Dropbox#sharingGetSharedLinkMetadata
-   * @arg {SharingGetSharedLinkMetadataArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<(SharingFileLinkMetadata|SharingFolderLinkMetadata|SharingSharedLinkMetadata)>, Error.<SharingSharedLinkError>>}
-   */
-
-
-  routes.sharingGetSharedLinkMetadata = function (arg) {
-    return this.request('sharing/get_shared_link_metadata', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns a list of LinkMetadata objects for this user, including collection
-   * links. If no path is given, returns a list of all shared links for the
-   * current user, including collection links, up to a maximum of 1000 links. If a
-   * non-empty path is given, returns a list of all shared links that allow access
-   * to the given path.  Collection links are never returned in this case. Note
-   * that the url field in the response is never the shortened URL.
-   * @function Dropbox#sharingGetSharedLinks
-   * @deprecated
-   * @arg {SharingGetSharedLinksArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingGetSharedLinksResult>, Error.<SharingGetSharedLinksError>>}
-   */
-
-
-  routes.sharingGetSharedLinks = function (arg) {
-    return this.request('sharing/get_shared_links', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Use to obtain the members who have been invited to a file, both inherited and
-   * uninherited members.
-   * @function Dropbox#sharingListFileMembers
-   * @arg {SharingListFileMembersArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingSharedFileMembers>, Error.<SharingListFileMembersError>>}
-   */
-
-
-  routes.sharingListFileMembers = function (arg) {
-    return this.request('sharing/list_file_members', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get members of multiple files at once. The arguments to this route are more
-   * limited, and the limit on query result size per file is more strict. To
-   * customize the results more, use the individual file endpoint. Inherited users
-   * and groups are not included in the result, and permissions are not returned
-   * for this endpoint.
-   * @function Dropbox#sharingListFileMembersBatch
-   * @arg {SharingListFileMembersBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Array.<SharingListFileMembersBatchResult>>, Error.<SharingSharingUserError>>}
-   */
-
-
-  routes.sharingListFileMembersBatch = function (arg) {
-    return this.request('sharing/list_file_members/batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from list_file_members or
-   * list_file_members/batch, use this to paginate through all shared file
-   * members.
-   * @function Dropbox#sharingListFileMembersContinue
-   * @arg {SharingListFileMembersContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingSharedFileMembers>, Error.<SharingListFileMembersContinueError>>}
-   */
-
-
-  routes.sharingListFileMembersContinue = function (arg) {
-    return this.request('sharing/list_file_members/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns shared folder membership by its folder ID.
-   * @function Dropbox#sharingListFolderMembers
-   * @arg {SharingListFolderMembersArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingSharedFolderMembers>, Error.<SharingSharedFolderAccessError>>}
-   */
-
-
-  routes.sharingListFolderMembers = function (arg) {
-    return this.request('sharing/list_folder_members', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from list_folder_members, use this to
-   * paginate through all shared folder members.
-   * @function Dropbox#sharingListFolderMembersContinue
-   * @arg {SharingListFolderMembersContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingSharedFolderMembers>, Error.<SharingListFolderMembersContinueError>>}
-   */
-
-
-  routes.sharingListFolderMembersContinue = function (arg) {
-    return this.request('sharing/list_folder_members/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Return the list of all shared folders the current user has access to.
-   * @function Dropbox#sharingListFolders
-   * @arg {SharingListFoldersArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingListFoldersResult>, Error.<void>>}
-   */
-
-
-  routes.sharingListFolders = function (arg) {
-    return this.request('sharing/list_folders', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from list_folders, use this to paginate
-   * through all shared folders. The cursor must come from a previous call to
-   * list_folders or list_folders/continue.
-   * @function Dropbox#sharingListFoldersContinue
-   * @arg {SharingListFoldersContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingListFoldersResult>, Error.<SharingListFoldersContinueError>>}
-   */
-
-
-  routes.sharingListFoldersContinue = function (arg) {
-    return this.request('sharing/list_folders/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Return the list of all shared folders the current user can mount or unmount.
-   * @function Dropbox#sharingListMountableFolders
-   * @arg {SharingListFoldersArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingListFoldersResult>, Error.<void>>}
-   */
-
-
-  routes.sharingListMountableFolders = function (arg) {
-    return this.request('sharing/list_mountable_folders', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from list_mountable_folders, use this to
-   * paginate through all mountable shared folders. The cursor must come from a
-   * previous call to list_mountable_folders or list_mountable_folders/continue.
-   * @function Dropbox#sharingListMountableFoldersContinue
-   * @arg {SharingListFoldersContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingListFoldersResult>, Error.<SharingListFoldersContinueError>>}
-   */
-
-
-  routes.sharingListMountableFoldersContinue = function (arg) {
-    return this.request('sharing/list_mountable_folders/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Returns a list of all files shared with current user.  Does not include files
-   * the user has received via shared folders, and does  not include unclaimed
-   * invitations.
-   * @function Dropbox#sharingListReceivedFiles
-   * @arg {SharingListFilesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingListFilesResult>, Error.<SharingSharingUserError>>}
-   */
-
-
-  routes.sharingListReceivedFiles = function (arg) {
-    return this.request('sharing/list_received_files', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get more results with a cursor from list_received_files.
-   * @function Dropbox#sharingListReceivedFilesContinue
-   * @arg {SharingListFilesContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingListFilesResult>, Error.<SharingListFilesContinueError>>}
-   */
-
-
-  routes.sharingListReceivedFilesContinue = function (arg) {
-    return this.request('sharing/list_received_files/continue', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * List shared links of this user. If no path is given, returns a list of all
-   * shared links for the current user. For members of business teams using team
-   * space and member folders, returns all shared links in the team member's home
-   * folder unless the team space ID is specified in the request header. For more
-   * information, refer to the Namespace Guide
-   * https://www.dropbox.com/developers/reference/namespace-guide. If a non-empty
-   * path is given, returns a list of all shared links that allow access to the
-   * given path - direct links to the given path and links to parent folders of
-   * the given path. Links to parent folders can be suppressed by setting
-   * direct_only to true.
-   * @function Dropbox#sharingListSharedLinks
-   * @arg {SharingListSharedLinksArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingListSharedLinksResult>, Error.<SharingListSharedLinksError>>}
-   */
-
-
-  routes.sharingListSharedLinks = function (arg) {
-    return this.request('sharing/list_shared_links', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Modify the shared link's settings. If the requested visibility conflict with
-   * the shared links policy of the team or the shared folder (in case the linked
-   * file is part of a shared folder) then the LinkPermissions.resolved_visibility
-   * of the returned SharedLinkMetadata will reflect the actual visibility of the
-   * shared link and the LinkPermissions.requested_visibility will reflect the
-   * requested visibility.
-   * @function Dropbox#sharingModifySharedLinkSettings
-   * @arg {SharingModifySharedLinkSettingsArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<(SharingFileLinkMetadata|SharingFolderLinkMetadata|SharingSharedLinkMetadata)>, Error.<SharingModifySharedLinkSettingsError>>}
-   */
-
-
-  routes.sharingModifySharedLinkSettings = function (arg) {
-    return this.request('sharing/modify_shared_link_settings', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * The current user mounts the designated folder. Mount a shared folder for a
-   * user after they have been added as a member. Once mounted, the shared folder
-   * will appear in their Dropbox.
-   * @function Dropbox#sharingMountFolder
-   * @arg {SharingMountFolderArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingSharedFolderMetadata>, Error.<SharingMountFolderError>>}
-   */
-
-
-  routes.sharingMountFolder = function (arg) {
-    return this.request('sharing/mount_folder', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * The current user relinquishes their membership in the designated file. Note
-   * that the current user may still have inherited access to this file through
-   * the parent folder.
-   * @function Dropbox#sharingRelinquishFileMembership
-   * @arg {SharingRelinquishFileMembershipArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<SharingRelinquishFileMembershipError>>}
-   */
-
-
-  routes.sharingRelinquishFileMembership = function (arg) {
-    return this.request('sharing/relinquish_file_membership', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * The current user relinquishes their membership in the designated shared
-   * folder and will no longer have access to the folder.  A folder owner cannot
-   * relinquish membership in their own folder. This will run synchronously if
-   * leave_a_copy is false, and asynchronously if leave_a_copy is true.
-   * @function Dropbox#sharingRelinquishFolderMembership
-   * @arg {SharingRelinquishFolderMembershipArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AsyncLaunchEmptyResult>, Error.<SharingRelinquishFolderMembershipError>>}
-   */
-
-
-  routes.sharingRelinquishFolderMembership = function (arg) {
-    return this.request('sharing/relinquish_folder_membership', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Identical to remove_file_member_2 but with less information returned.
-   * @function Dropbox#sharingRemoveFileMember
-   * @deprecated
-   * @arg {SharingRemoveFileMemberArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingFileMemberActionIndividualResult>, Error.<SharingRemoveFileMemberError>>}
-   */
-
-
-  routes.sharingRemoveFileMember = function (arg) {
-    return this.request('sharing/remove_file_member', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Removes a specified member from the file.
-   * @function Dropbox#sharingRemoveFileMember2
-   * @arg {SharingRemoveFileMemberArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingFileMemberRemoveActionResult>, Error.<SharingRemoveFileMemberError>>}
-   */
-
-
-  routes.sharingRemoveFileMember2 = function (arg) {
-    return this.request('sharing/remove_file_member_2', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Allows an owner or editor (if the ACL update policy allows) of a shared
-   * folder to remove another member.
-   * @function Dropbox#sharingRemoveFolderMember
-   * @arg {SharingRemoveFolderMemberArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AsyncLaunchResultBase>, Error.<SharingRemoveFolderMemberError>>}
-   */
-
-
-  routes.sharingRemoveFolderMember = function (arg) {
-    return this.request('sharing/remove_folder_member', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Revoke a shared link. Note that even after revoking a shared link to a file,
-   * the file may be accessible if there are shared links leading to any of the
-   * file parent folders. To list all shared links that enable access to a
-   * specific file, you can use the list_shared_links with the file as the
-   * ListSharedLinksArg.path argument.
-   * @function Dropbox#sharingRevokeSharedLink
-   * @arg {SharingRevokeSharedLinkArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<SharingRevokeSharedLinkError>>}
-   */
-
-
-  routes.sharingRevokeSharedLink = function (arg) {
-    return this.request('sharing/revoke_shared_link', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Change the inheritance policy of an existing Shared Folder. Only permitted
-   * for shared folders in a shared team root. If a ShareFolderLaunch.async_job_id
-   * is returned, you'll need to call check_share_job_status until the action
-   * completes to get the metadata for the folder.
-   * @function Dropbox#sharingSetAccessInheritance
-   * @arg {SharingSetAccessInheritanceArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingShareFolderLaunch>, Error.<SharingSetAccessInheritanceError>>}
-   */
-
-
-  routes.sharingSetAccessInheritance = function (arg) {
-    return this.request('sharing/set_access_inheritance', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Share a folder with collaborators. Most sharing will be completed
-   * synchronously. Large folders will be completed asynchronously. To make
-   * testing the async case repeatable, set `ShareFolderArg.force_async`. If a
-   * ShareFolderLaunch.async_job_id is returned, you'll need to call
-   * check_share_job_status until the action completes to get the metadata for the
-   * folder.
-   * @function Dropbox#sharingShareFolder
-   * @arg {SharingShareFolderArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingShareFolderLaunch>, Error.<SharingShareFolderError>>}
-   */
-
-
-  routes.sharingShareFolder = function (arg) {
-    return this.request('sharing/share_folder', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Transfer ownership of a shared folder to a member of the shared folder. User
-   * must have AccessLevel.owner access to the shared folder to perform a
-   * transfer.
-   * @function Dropbox#sharingTransferFolder
-   * @arg {SharingTransferFolderArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<SharingTransferFolderError>>}
-   */
-
-
-  routes.sharingTransferFolder = function (arg) {
-    return this.request('sharing/transfer_folder', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * The current user unmounts the designated folder. They can re-mount the folder
-   * at a later time using mount_folder.
-   * @function Dropbox#sharingUnmountFolder
-   * @arg {SharingUnmountFolderArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<SharingUnmountFolderError>>}
-   */
-
-
-  routes.sharingUnmountFolder = function (arg) {
-    return this.request('sharing/unmount_folder', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Remove all members from this file. Does not remove inherited members.
-   * @function Dropbox#sharingUnshareFile
-   * @arg {SharingUnshareFileArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<SharingUnshareFileError>>}
-   */
-
-
-  routes.sharingUnshareFile = function (arg) {
-    return this.request('sharing/unshare_file', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Allows a shared folder owner to unshare the folder. You'll need to call
-   * check_job_status to determine if the action has completed successfully.
-   * @function Dropbox#sharingUnshareFolder
-   * @arg {SharingUnshareFolderArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AsyncLaunchEmptyResult>, Error.<SharingUnshareFolderError>>}
-   */
-
-
-  routes.sharingUnshareFolder = function (arg) {
-    return this.request('sharing/unshare_folder', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Changes a member's access on a shared file.
-   * @function Dropbox#sharingUpdateFileMember
-   * @arg {SharingUpdateFileMemberArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingMemberAccessLevelResult>, Error.<SharingFileMemberActionError>>}
-   */
-
-
-  routes.sharingUpdateFileMember = function (arg) {
-    return this.request('sharing/update_file_member', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Allows an owner or editor of a shared folder to update another member's
-   * permissions.
-   * @function Dropbox#sharingUpdateFolderMember
-   * @arg {SharingUpdateFolderMemberArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingMemberAccessLevelResult>, Error.<SharingUpdateFolderMemberError>>}
-   */
-
-
-  routes.sharingUpdateFolderMember = function (arg) {
-    return this.request('sharing/update_folder_member', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Update the sharing policies for a shared folder. User must have
-   * AccessLevel.owner access to the shared folder to update its policies.
-   * @function Dropbox#sharingUpdateFolderPolicy
-   * @arg {SharingUpdateFolderPolicyArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<SharingSharedFolderMetadata>, Error.<SharingUpdateFolderPolicyError>>}
-   */
-
-
-  routes.sharingUpdateFolderPolicy = function (arg) {
-    return this.request('sharing/update_folder_policy', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * List all device sessions of a team's member.
-   * @function Dropbox#teamDevicesListMemberDevices
-   * @arg {TeamListMemberDevicesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamListMemberDevicesResult>, Error.<TeamListMemberDevicesError>>}
-   */
-
-
-  routes.teamDevicesListMemberDevices = function (arg) {
-    return this.request('team/devices/list_member_devices', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * List all device sessions of a team. Permission : Team member file access.
-   * @function Dropbox#teamDevicesListMembersDevices
-   * @arg {TeamListMembersDevicesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamListMembersDevicesResult>, Error.<TeamListMembersDevicesError>>}
-   */
-
-
-  routes.teamDevicesListMembersDevices = function (arg) {
-    return this.request('team/devices/list_members_devices', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * List all device sessions of a team. Permission : Team member file access.
-   * @function Dropbox#teamDevicesListTeamDevices
-   * @deprecated
-   * @arg {TeamListTeamDevicesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamListTeamDevicesResult>, Error.<TeamListTeamDevicesError>>}
-   */
-
-
-  routes.teamDevicesListTeamDevices = function (arg) {
-    return this.request('team/devices/list_team_devices', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Revoke a device session of a team's member.
-   * @function Dropbox#teamDevicesRevokeDeviceSession
-   * @arg {TeamRevokeDeviceSessionArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<TeamRevokeDeviceSessionError>>}
-   */
-
-
-  routes.teamDevicesRevokeDeviceSession = function (arg) {
-    return this.request('team/devices/revoke_device_session', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Revoke a list of device sessions of team members.
-   * @function Dropbox#teamDevicesRevokeDeviceSessionBatch
-   * @arg {TeamRevokeDeviceSessionBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamRevokeDeviceSessionBatchResult>, Error.<TeamRevokeDeviceSessionBatchError>>}
-   */
-
-
-  routes.teamDevicesRevokeDeviceSessionBatch = function (arg) {
-    return this.request('team/devices/revoke_device_session_batch', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Get the values for one or more featues. This route allows you to check your
-   * account's capability for what feature you can access or what value you have
-   * for certain features. Permission : Team information.
-   * @function Dropbox#teamFeaturesGetValues
-   * @arg {TeamFeaturesGetValuesBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamFeaturesGetValuesBatchResult>, Error.<TeamFeaturesGetValuesBatchError>>}
-   */
-
-
-  routes.teamFeaturesGetValues = function (arg) {
-    return this.request('team/features/get_values', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Retrieves information about a team.
-   * @function Dropbox#teamGetInfo
-   * @returns {Promise.<DropboxResponse<TeamTeamGetInfoResult>, Error.<void>>}
-   */
-
-
-  routes.teamGetInfo = function () {
-    return this.request('team/get_info', null, 'team', 'api', 'rpc');
-  };
-  /**
-   * Creates a new, empty group, with a requested name. Permission : Team member
-   * management.
-   * @function Dropbox#teamGroupsCreate
-   * @arg {TeamGroupCreateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGroupFullInfo>, Error.<TeamGroupCreateError>>}
-   */
-
-
-  routes.teamGroupsCreate = function (arg) {
-    return this.request('team/groups/create', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Deletes a group. The group is deleted immediately. However the revoking of
-   * group-owned resources may take additional time. Use the groups/job_status/get
-   * to determine whether this process has completed. Permission : Team member
-   * management.
-   * @function Dropbox#teamGroupsDelete
-   * @arg {TeamGroupSelector} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AsyncLaunchEmptyResult>, Error.<TeamGroupDeleteError>>}
-   */
-
-
-  routes.teamGroupsDelete = function (arg) {
-    return this.request('team/groups/delete', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Retrieves information about one or more groups. Note that the optional field
-   * GroupFullInfo.members is not returned for system-managed groups. Permission :
-   * Team Information.
-   * @function Dropbox#teamGroupsGetInfo
-   * @arg {TeamGroupsSelector} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Object>, Error.<TeamGroupsGetInfoError>>}
-   */
-
-
-  routes.teamGroupsGetInfo = function (arg) {
-    return this.request('team/groups/get_info', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once an async_job_id is returned from groups/delete, groups/members/add , or
-   * groups/members/remove use this method to poll the status of granting/revoking
-   * group members' access to group-owned resources. Permission : Team member
-   * management.
-   * @function Dropbox#teamGroupsJobStatusGet
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AsyncPollEmptyResult>, Error.<TeamGroupsPollError>>}
-   */
-
-
-  routes.teamGroupsJobStatusGet = function (arg) {
-    return this.request('team/groups/job_status/get', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Lists groups on a team. Permission : Team Information.
-   * @function Dropbox#teamGroupsList
-   * @arg {TeamGroupsListArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGroupsListResult>, Error.<void>>}
-   */
-
-
-  routes.teamGroupsList = function (arg) {
-    return this.request('team/groups/list', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from groups/list, use this to paginate
-   * through all groups. Permission : Team Information.
-   * @function Dropbox#teamGroupsListContinue
-   * @arg {TeamGroupsListContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGroupsListResult>, Error.<TeamGroupsListContinueError>>}
-   */
-
-
-  routes.teamGroupsListContinue = function (arg) {
-    return this.request('team/groups/list/continue', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Adds members to a group. The members are added immediately. However the
-   * granting of group-owned resources may take additional time. Use the
-   * groups/job_status/get to determine whether this process has completed.
-   * Permission : Team member management.
-   * @function Dropbox#teamGroupsMembersAdd
-   * @arg {TeamGroupMembersAddArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGroupMembersChangeResult>, Error.<TeamGroupMembersAddError>>}
-   */
-
-
-  routes.teamGroupsMembersAdd = function (arg) {
-    return this.request('team/groups/members/add', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Lists members of a group. Permission : Team Information.
-   * @function Dropbox#teamGroupsMembersList
-   * @arg {TeamGroupsMembersListArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGroupsMembersListResult>, Error.<TeamGroupSelectorError>>}
-   */
-
-
-  routes.teamGroupsMembersList = function (arg) {
-    return this.request('team/groups/members/list', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from groups/members/list, use this to
-   * paginate through all members of the group. Permission : Team information.
-   * @function Dropbox#teamGroupsMembersListContinue
-   * @arg {TeamGroupsMembersListContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGroupsMembersListResult>, Error.<TeamGroupsMembersListContinueError>>}
-   */
-
-
-  routes.teamGroupsMembersListContinue = function (arg) {
-    return this.request('team/groups/members/list/continue', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Removes members from a group. The members are removed immediately. However
-   * the revoking of group-owned resources may take additional time. Use the
-   * groups/job_status/get to determine whether this process has completed. This
-   * method permits removing the only owner of a group, even in cases where this
-   * is not possible via the web client. Permission : Team member management.
-   * @function Dropbox#teamGroupsMembersRemove
-   * @arg {TeamGroupMembersRemoveArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGroupMembersChangeResult>, Error.<TeamGroupMembersRemoveError>>}
-   */
-
-
-  routes.teamGroupsMembersRemove = function (arg) {
-    return this.request('team/groups/members/remove', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Sets a member's access type in a group. Permission : Team member management.
-   * @function Dropbox#teamGroupsMembersSetAccessType
-   * @arg {TeamGroupMembersSetAccessTypeArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Object>, Error.<TeamGroupMemberSetAccessTypeError>>}
-   */
-
-
-  routes.teamGroupsMembersSetAccessType = function (arg) {
-    return this.request('team/groups/members/set_access_type', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Updates a group's name and/or external ID. Permission : Team member
-   * management.
-   * @function Dropbox#teamGroupsUpdate
-   * @arg {TeamGroupUpdateArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGroupFullInfo>, Error.<TeamGroupUpdateError>>}
-   */
-
-
-  routes.teamGroupsUpdate = function (arg) {
-    return this.request('team/groups/update', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Creates new legal hold policy. Note: Legal Holds is a paid add-on. Not all
-   * teams have the feature. Permission : Team member file access.
-   * @function Dropbox#teamLegalHoldsCreatePolicy
-   * @arg {TeamLegalHoldsPolicyCreateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Object>, Error.<TeamLegalHoldsPolicyCreateError>>}
-   */
-
-
-  routes.teamLegalHoldsCreatePolicy = function (arg) {
-    return this.request('team/legal_holds/create_policy', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Gets a legal hold by Id. Note: Legal Holds is a paid add-on. Not all teams
-   * have the feature. Permission : Team member file access.
-   * @function Dropbox#teamLegalHoldsGetPolicy
-   * @arg {TeamLegalHoldsGetPolicyArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Object>, Error.<TeamLegalHoldsGetPolicyError>>}
-   */
-
-
-  routes.teamLegalHoldsGetPolicy = function (arg) {
-    return this.request('team/legal_holds/get_policy', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * List the file metadata that's under the hold. Note: Legal Holds is a paid
-   * add-on. Not all teams have the feature. Permission : Team member file access.
-   * @function Dropbox#teamLegalHoldsListHeldRevisions
-   * @arg {TeamLegalHoldsListHeldRevisionsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamLegalHoldsListHeldRevisionResult>, Error.<TeamLegalHoldsListHeldRevisionsError>>}
-   */
-
-
-  routes.teamLegalHoldsListHeldRevisions = function (arg) {
-    return this.request('team/legal_holds/list_held_revisions', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Continue listing the file metadata that's under the hold. Note: Legal Holds
-   * is a paid add-on. Not all teams have the feature. Permission : Team member
-   * file access.
-   * @function Dropbox#teamLegalHoldsListHeldRevisionsContinue
-   * @arg {TeamLegalHoldsListHeldRevisionsContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamLegalHoldsListHeldRevisionResult>, Error.<TeamLegalHoldsListHeldRevisionsError>>}
-   */
-
-
-  routes.teamLegalHoldsListHeldRevisionsContinue = function (arg) {
-    return this.request('team/legal_holds/list_held_revisions_continue', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Lists legal holds on a team. Note: Legal Holds is a paid add-on. Not all
-   * teams have the feature. Permission : Team member file access.
-   * @function Dropbox#teamLegalHoldsListPolicies
-   * @arg {TeamLegalHoldsListPoliciesArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamLegalHoldsListPoliciesResult>, Error.<TeamLegalHoldsListPoliciesError>>}
-   */
-
-
-  routes.teamLegalHoldsListPolicies = function (arg) {
-    return this.request('team/legal_holds/list_policies', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Releases a legal hold by Id. Note: Legal Holds is a paid add-on. Not all
-   * teams have the feature. Permission : Team member file access.
-   * @function Dropbox#teamLegalHoldsReleasePolicy
-   * @arg {TeamLegalHoldsPolicyReleaseArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<TeamLegalHoldsPolicyReleaseError>>}
-   */
-
-
-  routes.teamLegalHoldsReleasePolicy = function (arg) {
-    return this.request('team/legal_holds/release_policy', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Updates a legal hold. Note: Legal Holds is a paid add-on. Not all teams have
-   * the feature. Permission : Team member file access.
-   * @function Dropbox#teamLegalHoldsUpdatePolicy
-   * @arg {TeamLegalHoldsPolicyUpdateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Object>, Error.<TeamLegalHoldsPolicyUpdateError>>}
-   */
-
-
-  routes.teamLegalHoldsUpdatePolicy = function (arg) {
-    return this.request('team/legal_holds/update_policy', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * List all linked applications of the team member. Note, this endpoint does not
-   * list any team-linked applications.
-   * @function Dropbox#teamLinkedAppsListMemberLinkedApps
-   * @arg {TeamListMemberAppsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamListMemberAppsResult>, Error.<TeamListMemberAppsError>>}
-   */
-
-
-  routes.teamLinkedAppsListMemberLinkedApps = function (arg) {
-    return this.request('team/linked_apps/list_member_linked_apps', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * List all applications linked to the team members' accounts. Note, this
-   * endpoint does not list any team-linked applications.
-   * @function Dropbox#teamLinkedAppsListMembersLinkedApps
-   * @arg {TeamListMembersAppsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamListMembersAppsResult>, Error.<TeamListMembersAppsError>>}
-   */
-
-
-  routes.teamLinkedAppsListMembersLinkedApps = function (arg) {
-    return this.request('team/linked_apps/list_members_linked_apps', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * List all applications linked to the team members' accounts. Note, this
-   * endpoint doesn't list any team-linked applications.
-   * @function Dropbox#teamLinkedAppsListTeamLinkedApps
-   * @deprecated
-   * @arg {TeamListTeamAppsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamListTeamAppsResult>, Error.<TeamListTeamAppsError>>}
-   */
-
-
-  routes.teamLinkedAppsListTeamLinkedApps = function (arg) {
-    return this.request('team/linked_apps/list_team_linked_apps', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Revoke a linked application of the team member.
-   * @function Dropbox#teamLinkedAppsRevokeLinkedApp
-   * @arg {TeamRevokeLinkedApiAppArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<TeamRevokeLinkedAppError>>}
-   */
-
-
-  routes.teamLinkedAppsRevokeLinkedApp = function (arg) {
-    return this.request('team/linked_apps/revoke_linked_app', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Revoke a list of linked applications of the team members.
-   * @function Dropbox#teamLinkedAppsRevokeLinkedAppBatch
-   * @arg {TeamRevokeLinkedApiAppBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamRevokeLinkedAppBatchResult>, Error.<TeamRevokeLinkedAppBatchError>>}
-   */
-
-
-  routes.teamLinkedAppsRevokeLinkedAppBatch = function (arg) {
-    return this.request('team/linked_apps/revoke_linked_app_batch', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Add users to member space limits excluded users list.
-   * @function Dropbox#teamMemberSpaceLimitsExcludedUsersAdd
-   * @arg {TeamExcludedUsersUpdateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamExcludedUsersUpdateResult>, Error.<TeamExcludedUsersUpdateError>>}
-   */
-
-
-  routes.teamMemberSpaceLimitsExcludedUsersAdd = function (arg) {
-    return this.request('team/member_space_limits/excluded_users/add', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * List member space limits excluded users.
-   * @function Dropbox#teamMemberSpaceLimitsExcludedUsersList
-   * @arg {TeamExcludedUsersListArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamExcludedUsersListResult>, Error.<TeamExcludedUsersListError>>}
-   */
-
-
-  routes.teamMemberSpaceLimitsExcludedUsersList = function (arg) {
-    return this.request('team/member_space_limits/excluded_users/list', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Continue listing member space limits excluded users.
-   * @function Dropbox#teamMemberSpaceLimitsExcludedUsersListContinue
-   * @arg {TeamExcludedUsersListContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamExcludedUsersListResult>, Error.<TeamExcludedUsersListContinueError>>}
-   */
-
-
-  routes.teamMemberSpaceLimitsExcludedUsersListContinue = function (arg) {
-    return this.request('team/member_space_limits/excluded_users/list/continue', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Remove users from member space limits excluded users list.
-   * @function Dropbox#teamMemberSpaceLimitsExcludedUsersRemove
-   * @arg {TeamExcludedUsersUpdateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamExcludedUsersUpdateResult>, Error.<TeamExcludedUsersUpdateError>>}
-   */
-
-
-  routes.teamMemberSpaceLimitsExcludedUsersRemove = function (arg) {
-    return this.request('team/member_space_limits/excluded_users/remove', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Get users custom quota. Returns none as the custom quota if none was set. A
-   * maximum of 1000 members can be specified in a single call.
-   * @function Dropbox#teamMemberSpaceLimitsGetCustomQuota
-   * @arg {TeamCustomQuotaUsersArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Array.<TeamCustomQuotaResult>>, Error.<TeamCustomQuotaError>>}
-   */
-
-
-  routes.teamMemberSpaceLimitsGetCustomQuota = function (arg) {
-    return this.request('team/member_space_limits/get_custom_quota', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Remove users custom quota. A maximum of 1000 members can be specified in a
-   * single call.
-   * @function Dropbox#teamMemberSpaceLimitsRemoveCustomQuota
-   * @arg {TeamCustomQuotaUsersArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Array.<TeamRemoveCustomQuotaResult>>, Error.<TeamCustomQuotaError>>}
-   */
-
-
-  routes.teamMemberSpaceLimitsRemoveCustomQuota = function (arg) {
-    return this.request('team/member_space_limits/remove_custom_quota', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Set users custom quota. Custom quota has to be at least 15GB. A maximum of
-   * 1000 members can be specified in a single call.
-   * @function Dropbox#teamMemberSpaceLimitsSetCustomQuota
-   * @arg {TeamSetCustomQuotaArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Array.<TeamCustomQuotaResult>>, Error.<TeamSetCustomQuotaError>>}
-   */
-
-
-  routes.teamMemberSpaceLimitsSetCustomQuota = function (arg) {
-    return this.request('team/member_space_limits/set_custom_quota', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Adds members to a team. Permission : Team member management A maximum of 20
-   * members can be specified in a single call. If no Dropbox account exists with
-   * the email address specified, a new Dropbox account will be created with the
-   * given email address, and that account will be invited to the team. If a
-   * personal Dropbox account exists with the email address specified in the call,
-   * this call will create a placeholder Dropbox account for the user on the team
-   * and send an email inviting the user to migrate their existing personal
-   * account onto the team. Team member management apps are required to set an
-   * initial given_name and surname for a user to use in the team invitation and
-   * for 'Perform as team member' actions taken on the user before they become
-   * 'active'.
-   * @function Dropbox#teamMembersAddV2
-   * @arg {TeamMembersAddV2Arg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersAddLaunchV2Result>, Error.<void>>}
-   */
-
-
-  routes.teamMembersAddV2 = function (arg) {
-    return this.request('team/members/add_v2', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Adds members to a team. Permission : Team member management A maximum of 20
-   * members can be specified in a single call. If no Dropbox account exists with
-   * the email address specified, a new Dropbox account will be created with the
-   * given email address, and that account will be invited to the team. If a
-   * personal Dropbox account exists with the email address specified in the call,
-   * this call will create a placeholder Dropbox account for the user on the team
-   * and send an email inviting the user to migrate their existing personal
-   * account onto the team. Team member management apps are required to set an
-   * initial given_name and surname for a user to use in the team invitation and
-   * for 'Perform as team member' actions taken on the user before they become
-   * 'active'.
-   * @function Dropbox#teamMembersAdd
-   * @arg {TeamMembersAddArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersAddLaunch>, Error.<void>>}
-   */
-
-
-  routes.teamMembersAdd = function (arg) {
-    return this.request('team/members/add', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once an async_job_id is returned from members/add_v2 , use this to poll the
-   * status of the asynchronous request. Permission : Team member management.
-   * @function Dropbox#teamMembersAddJobStatusGetV2
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersAddJobStatusV2Result>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.teamMembersAddJobStatusGetV2 = function (arg) {
-    return this.request('team/members/add/job_status/get_v2', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once an async_job_id is returned from members/add , use this to poll the
-   * status of the asynchronous request. Permission : Team member management.
-   * @function Dropbox#teamMembersAddJobStatusGet
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersAddJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.teamMembersAddJobStatusGet = function (arg) {
-    return this.request('team/members/add/job_status/get', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Deletes a team member's profile photo. Permission : Team member management.
-   * @function Dropbox#teamMembersDeleteProfilePhotoV2
-   * @arg {TeamMembersDeleteProfilePhotoArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamMemberInfoV2Result>, Error.<TeamMembersDeleteProfilePhotoError>>}
-   */
-
-
-  routes.teamMembersDeleteProfilePhotoV2 = function (arg) {
-    return this.request('team/members/delete_profile_photo_v2', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Deletes a team member's profile photo. Permission : Team member management.
-   * @function Dropbox#teamMembersDeleteProfilePhoto
-   * @arg {TeamMembersDeleteProfilePhotoArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamMemberInfo>, Error.<TeamMembersDeleteProfilePhotoError>>}
-   */
-
-
-  routes.teamMembersDeleteProfilePhoto = function (arg) {
-    return this.request('team/members/delete_profile_photo', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Get available TeamMemberRoles for the connected team. To be used with
-   * members/set_admin_permissions_v2. Permission : Team member management.
-   * @function Dropbox#teamMembersGetAvailableTeamMemberRoles
-   * @returns {Promise.<DropboxResponse<TeamMembersGetAvailableTeamMemberRolesResult>, Error.<void>>}
-   */
-
-
-  routes.teamMembersGetAvailableTeamMemberRoles = function () {
-    return this.request('team/members/get_available_team_member_roles', null, 'team', 'api', 'rpc');
-  };
-  /**
-   * Returns information about multiple team members. Permission : Team
-   * information This endpoint will return MembersGetInfoItem.id_not_found, for
-   * IDs (or emails) that cannot be matched to a valid team member.
-   * @function Dropbox#teamMembersGetInfoV2
-   * @arg {TeamMembersGetInfoV2Arg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersGetInfoV2Result>, Error.<TeamMembersGetInfoError>>}
-   */
-
-
-  routes.teamMembersGetInfoV2 = function (arg) {
-    return this.request('team/members/get_info_v2', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Returns information about multiple team members. Permission : Team
-   * information This endpoint will return MembersGetInfoItem.id_not_found, for
-   * IDs (or emails) that cannot be matched to a valid team member.
-   * @function Dropbox#teamMembersGetInfo
-   * @arg {TeamMembersGetInfoArgs} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Object>, Error.<TeamMembersGetInfoError>>}
-   */
-
-
-  routes.teamMembersGetInfo = function (arg) {
-    return this.request('team/members/get_info', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Lists members of a team. Permission : Team information.
-   * @function Dropbox#teamMembersListV2
-   * @arg {TeamMembersListArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersListV2Result>, Error.<TeamMembersListError>>}
-   */
-
-
-  routes.teamMembersListV2 = function (arg) {
-    return this.request('team/members/list_v2', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Lists members of a team. Permission : Team information.
-   * @function Dropbox#teamMembersList
-   * @arg {TeamMembersListArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersListResult>, Error.<TeamMembersListError>>}
-   */
-
-
-  routes.teamMembersList = function (arg) {
-    return this.request('team/members/list', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from members/list_v2, use this to paginate
-   * through all team members. Permission : Team information.
-   * @function Dropbox#teamMembersListContinueV2
-   * @arg {TeamMembersListContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersListV2Result>, Error.<TeamMembersListContinueError>>}
-   */
-
-
-  routes.teamMembersListContinueV2 = function (arg) {
-    return this.request('team/members/list/continue_v2', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from members/list, use this to paginate
-   * through all team members. Permission : Team information.
-   * @function Dropbox#teamMembersListContinue
-   * @arg {TeamMembersListContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersListResult>, Error.<TeamMembersListContinueError>>}
-   */
-
-
-  routes.teamMembersListContinue = function (arg) {
-    return this.request('team/members/list/continue', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Moves removed member's files to a different member. This endpoint initiates
-   * an asynchronous job. To obtain the final result of the job, the client should
-   * periodically poll members/move_former_member_files/job_status/check.
-   * Permission : Team member management.
-   * @function Dropbox#teamMembersMoveFormerMemberFiles
-   * @arg {TeamMembersDataTransferArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AsyncLaunchEmptyResult>, Error.<TeamMembersTransferFormerMembersFilesError>>}
-   */
-
-
-  routes.teamMembersMoveFormerMemberFiles = function (arg) {
-    return this.request('team/members/move_former_member_files', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once an async_job_id is returned from members/move_former_member_files , use
-   * this to poll the status of the asynchronous request. Permission : Team member
-   * management.
-   * @function Dropbox#teamMembersMoveFormerMemberFilesJobStatusCheck
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AsyncPollEmptyResult>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.teamMembersMoveFormerMemberFilesJobStatusCheck = function (arg) {
-    return this.request('team/members/move_former_member_files/job_status/check', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Recover a deleted member. Permission : Team member management Exactly one of
-   * team_member_id, email, or external_id must be provided to identify the user
-   * account.
-   * @function Dropbox#teamMembersRecover
-   * @arg {TeamMembersRecoverArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<TeamMembersRecoverError>>}
-   */
-
-
-  routes.teamMembersRecover = function (arg) {
-    return this.request('team/members/recover', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Removes a member from a team. Permission : Team member management Exactly one
-   * of team_member_id, email, or external_id must be provided to identify the
-   * user account. Accounts can be recovered via members/recover for a 7 day
-   * period or until the account has been permanently deleted or transferred to
-   * another account (whichever comes first). Calling members/add while a user is
-   * still recoverable on your team will return with
-   * MemberAddResult.user_already_on_team. Accounts can have their files
-   * transferred via the admin console for a limited time, based on the version
-   * history length associated with the team (180 days for most teams). This
-   * endpoint may initiate an asynchronous job. To obtain the final result of the
-   * job, the client should periodically poll members/remove/job_status/get.
-   * @function Dropbox#teamMembersRemove
-   * @arg {TeamMembersRemoveArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AsyncLaunchEmptyResult>, Error.<TeamMembersRemoveError>>}
-   */
-
-
-  routes.teamMembersRemove = function (arg) {
-    return this.request('team/members/remove', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once an async_job_id is returned from members/remove , use this to poll the
-   * status of the asynchronous request. Permission : Team member management.
-   * @function Dropbox#teamMembersRemoveJobStatusGet
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<AsyncPollEmptyResult>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.teamMembersRemoveJobStatusGet = function (arg) {
-    return this.request('team/members/remove/job_status/get', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Add secondary emails to users. Permission : Team member management. Emails
-   * that are on verified domains will be verified automatically. For each email
-   * address not on a verified domain a verification email will be sent.
-   * @function Dropbox#teamMembersSecondaryEmailsAdd
-   * @arg {TeamAddSecondaryEmailsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamAddSecondaryEmailsResult>, Error.<TeamAddSecondaryEmailsError>>}
-   */
-
-
-  routes.teamMembersSecondaryEmailsAdd = function (arg) {
-    return this.request('team/members/secondary_emails/add', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Delete secondary emails from users Permission : Team member management. Users
-   * will be notified of deletions of verified secondary emails at both the
-   * secondary email and their primary email.
-   * @function Dropbox#teamMembersSecondaryEmailsDelete
-   * @arg {TeamDeleteSecondaryEmailsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamDeleteSecondaryEmailsResult>, Error.<void>>}
-   */
-
-
-  routes.teamMembersSecondaryEmailsDelete = function (arg) {
-    return this.request('team/members/secondary_emails/delete', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Resend secondary email verification emails. Permission : Team member
-   * management.
-   * @function Dropbox#teamMembersSecondaryEmailsResendVerificationEmails
-   * @arg {TeamResendVerificationEmailArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamResendVerificationEmailResult>, Error.<void>>}
-   */
-
-
-  routes.teamMembersSecondaryEmailsResendVerificationEmails = function (arg) {
-    return this.request('team/members/secondary_emails/resend_verification_emails', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Sends welcome email to pending team member. Permission : Team member
-   * management Exactly one of team_member_id, email, or external_id must be
-   * provided to identify the user account. No-op if team member is not pending.
-   * @function Dropbox#teamMembersSendWelcomeEmail
-   * @arg {TeamUserSelectorArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<TeamMembersSendWelcomeError>>}
-   */
-
-
-  routes.teamMembersSendWelcomeEmail = function (arg) {
-    return this.request('team/members/send_welcome_email', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Updates a team member's permissions. Permission : Team member management.
-   * @function Dropbox#teamMembersSetAdminPermissionsV2
-   * @arg {TeamMembersSetPermissions2Arg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersSetPermissions2Result>, Error.<TeamMembersSetPermissions2Error>>}
-   */
-
-
-  routes.teamMembersSetAdminPermissionsV2 = function (arg) {
-    return this.request('team/members/set_admin_permissions_v2', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Updates a team member's permissions. Permission : Team member management.
-   * @function Dropbox#teamMembersSetAdminPermissions
-   * @arg {TeamMembersSetPermissionsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamMembersSetPermissionsResult>, Error.<TeamMembersSetPermissionsError>>}
-   */
-
-
-  routes.teamMembersSetAdminPermissions = function (arg) {
-    return this.request('team/members/set_admin_permissions', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Updates a team member's profile. Permission : Team member management.
-   * @function Dropbox#teamMembersSetProfileV2
-   * @arg {TeamMembersSetProfileArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamMemberInfoV2Result>, Error.<TeamMembersSetProfileError>>}
-   */
-
-
-  routes.teamMembersSetProfileV2 = function (arg) {
-    return this.request('team/members/set_profile_v2', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Updates a team member's profile. Permission : Team member management.
-   * @function Dropbox#teamMembersSetProfile
-   * @arg {TeamMembersSetProfileArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamMemberInfo>, Error.<TeamMembersSetProfileError>>}
-   */
-
-
-  routes.teamMembersSetProfile = function (arg) {
-    return this.request('team/members/set_profile', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Updates a team member's profile photo. Permission : Team member management.
-   * @function Dropbox#teamMembersSetProfilePhotoV2
-   * @arg {TeamMembersSetProfilePhotoArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamMemberInfoV2Result>, Error.<TeamMembersSetProfilePhotoError>>}
-   */
-
-
-  routes.teamMembersSetProfilePhotoV2 = function (arg) {
-    return this.request('team/members/set_profile_photo_v2', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Updates a team member's profile photo. Permission : Team member management.
-   * @function Dropbox#teamMembersSetProfilePhoto
-   * @arg {TeamMembersSetProfilePhotoArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamMemberInfo>, Error.<TeamMembersSetProfilePhotoError>>}
-   */
-
-
-  routes.teamMembersSetProfilePhoto = function (arg) {
-    return this.request('team/members/set_profile_photo', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Suspend a member from a team. Permission : Team member management Exactly one
-   * of team_member_id, email, or external_id must be provided to identify the
-   * user account.
-   * @function Dropbox#teamMembersSuspend
-   * @arg {TeamMembersDeactivateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<TeamMembersSuspendError>>}
-   */
-
-
-  routes.teamMembersSuspend = function (arg) {
-    return this.request('team/members/suspend', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Unsuspend a member from a team. Permission : Team member management Exactly
-   * one of team_member_id, email, or external_id must be provided to identify the
-   * user account.
-   * @function Dropbox#teamMembersUnsuspend
-   * @arg {TeamMembersUnsuspendArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<TeamMembersUnsuspendError>>}
-   */
-
-
-  routes.teamMembersUnsuspend = function (arg) {
-    return this.request('team/members/unsuspend', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Returns a list of all team-accessible namespaces. This list includes team
-   * folders, shared folders containing team members, team members' home
-   * namespaces, and team members' app folders. Home namespaces and app folders
-   * are always owned by this team or members of the team, but shared folders may
-   * be owned by other users or other teams. Duplicates may occur in the list.
-   * @function Dropbox#teamNamespacesList
-   * @arg {TeamTeamNamespacesListArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamNamespacesListResult>, Error.<TeamTeamNamespacesListError>>}
-   */
-
-
-  routes.teamNamespacesList = function (arg) {
-    return this.request('team/namespaces/list', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from namespaces/list, use this to paginate
-   * through all team-accessible namespaces. Duplicates may occur in the list.
-   * @function Dropbox#teamNamespacesListContinue
-   * @arg {TeamTeamNamespacesListContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamNamespacesListResult>, Error.<TeamTeamNamespacesListContinueError>>}
-   */
-
-
-  routes.teamNamespacesListContinue = function (arg) {
-    return this.request('team/namespaces/list/continue', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Permission : Team member file access.
-   * @function Dropbox#teamPropertiesTemplateAdd
-   * @deprecated
-   * @arg {FilePropertiesAddTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesAddTemplateResult>, Error.<FilePropertiesModifyTemplateError>>}
-   */
-
-
-  routes.teamPropertiesTemplateAdd = function (arg) {
-    return this.request('team/properties/template/add', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Permission : Team member file access. The scope for the route is
-   * files.team_metadata.write.
-   * @function Dropbox#teamPropertiesTemplateGet
-   * @deprecated
-   * @arg {FilePropertiesGetTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesGetTemplateResult>, Error.<FilePropertiesTemplateError>>}
-   */
-
-
-  routes.teamPropertiesTemplateGet = function (arg) {
-    return this.request('team/properties/template/get', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Permission : Team member file access. The scope for the route is
-   * files.team_metadata.write.
-   * @function Dropbox#teamPropertiesTemplateList
-   * @deprecated
-   * @returns {Promise.<DropboxResponse<FilePropertiesListTemplateResult>, Error.<FilePropertiesTemplateError>>}
-   */
-
-
-  routes.teamPropertiesTemplateList = function () {
-    return this.request('team/properties/template/list', null, 'team', 'api', 'rpc');
-  };
-  /**
-   * Permission : Team member file access.
-   * @function Dropbox#teamPropertiesTemplateUpdate
-   * @deprecated
-   * @arg {FilePropertiesUpdateTemplateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<FilePropertiesUpdateTemplateResult>, Error.<FilePropertiesModifyTemplateError>>}
-   */
-
-
-  routes.teamPropertiesTemplateUpdate = function (arg) {
-    return this.request('team/properties/template/update', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Retrieves reporting data about a team's user activity. Deprecated: Will be
-   * removed on July 1st 2021.
-   * @function Dropbox#teamReportsGetActivity
-   * @deprecated
-   * @arg {TeamDateRange} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGetActivityReport>, Error.<TeamDateRangeError>>}
-   */
-
-
-  routes.teamReportsGetActivity = function (arg) {
-    return this.request('team/reports/get_activity', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Retrieves reporting data about a team's linked devices. Deprecated: Will be
-   * removed on July 1st 2021.
-   * @function Dropbox#teamReportsGetDevices
-   * @deprecated
-   * @arg {TeamDateRange} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGetDevicesReport>, Error.<TeamDateRangeError>>}
-   */
-
-
-  routes.teamReportsGetDevices = function (arg) {
-    return this.request('team/reports/get_devices', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Retrieves reporting data about a team's membership. Deprecated: Will be
-   * removed on July 1st 2021.
-   * @function Dropbox#teamReportsGetMembership
-   * @deprecated
-   * @arg {TeamDateRange} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGetMembershipReport>, Error.<TeamDateRangeError>>}
-   */
-
-
-  routes.teamReportsGetMembership = function (arg) {
-    return this.request('team/reports/get_membership', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Retrieves reporting data about a team's storage usage. Deprecated: Will be
-   * removed on July 1st 2021.
-   * @function Dropbox#teamReportsGetStorage
-   * @deprecated
-   * @arg {TeamDateRange} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamGetStorageReport>, Error.<TeamDateRangeError>>}
-   */
-
-
-  routes.teamReportsGetStorage = function (arg) {
-    return this.request('team/reports/get_storage', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Sets an archived team folder's status to active. Permission : Team member
-   * file access.
-   * @function Dropbox#teamTeamFolderActivate
-   * @arg {TeamTeamFolderIdArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamFolderMetadata>, Error.<TeamTeamFolderActivateError>>}
-   */
-
-
-  routes.teamTeamFolderActivate = function (arg) {
-    return this.request('team/team_folder/activate', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Sets an active team folder's status to archived and removes all folder and
-   * file members. Permission : Team member file access.
-   * @function Dropbox#teamTeamFolderArchive
-   * @arg {TeamTeamFolderArchiveArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamFolderArchiveLaunch>, Error.<TeamTeamFolderArchiveError>>}
-   */
-
-
-  routes.teamTeamFolderArchive = function (arg) {
-    return this.request('team/team_folder/archive', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Returns the status of an asynchronous job for archiving a team folder.
-   * Permission : Team member file access.
-   * @function Dropbox#teamTeamFolderArchiveCheck
-   * @arg {AsyncPollArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamFolderArchiveJobStatus>, Error.<AsyncPollError>>}
-   */
-
-
-  routes.teamTeamFolderArchiveCheck = function (arg) {
-    return this.request('team/team_folder/archive/check', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Creates a new, active, team folder with no members. Permission : Team member
-   * file access.
-   * @function Dropbox#teamTeamFolderCreate
-   * @arg {TeamTeamFolderCreateArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamFolderMetadata>, Error.<TeamTeamFolderCreateError>>}
-   */
-
-
-  routes.teamTeamFolderCreate = function (arg) {
-    return this.request('team/team_folder/create', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Retrieves metadata for team folders. Permission : Team member file access.
-   * @function Dropbox#teamTeamFolderGetInfo
-   * @arg {TeamTeamFolderIdListArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Array.<TeamTeamFolderGetInfoItem>>, Error.<void>>}
-   */
-
-
-  routes.teamTeamFolderGetInfo = function (arg) {
-    return this.request('team/team_folder/get_info', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Lists all team folders. Permission : Team member file access.
-   * @function Dropbox#teamTeamFolderList
-   * @arg {TeamTeamFolderListArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamFolderListResult>, Error.<TeamTeamFolderListError>>}
-   */
-
-
-  routes.teamTeamFolderList = function (arg) {
-    return this.request('team/team_folder/list', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from team_folder/list, use this to paginate
-   * through all team folders. Permission : Team member file access.
-   * @function Dropbox#teamTeamFolderListContinue
-   * @arg {TeamTeamFolderListContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamFolderListResult>, Error.<TeamTeamFolderListContinueError>>}
-   */
-
-
-  routes.teamTeamFolderListContinue = function (arg) {
-    return this.request('team/team_folder/list/continue', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Permanently deletes an archived team folder. Permission : Team member file
-   * access.
-   * @function Dropbox#teamTeamFolderPermanentlyDelete
-   * @arg {TeamTeamFolderIdArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<void>, Error.<TeamTeamFolderPermanentlyDeleteError>>}
-   */
-
-
-  routes.teamTeamFolderPermanentlyDelete = function (arg) {
-    return this.request('team/team_folder/permanently_delete', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Changes an active team folder's name. Permission : Team member file access.
-   * @function Dropbox#teamTeamFolderRename
-   * @arg {TeamTeamFolderRenameArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamFolderMetadata>, Error.<TeamTeamFolderRenameError>>}
-   */
-
-
-  routes.teamTeamFolderRename = function (arg) {
-    return this.request('team/team_folder/rename', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Updates the sync settings on a team folder or its contents.  Use of this
-   * endpoint requires that the team has team selective sync enabled.
-   * @function Dropbox#teamTeamFolderUpdateSyncSettings
-   * @arg {TeamTeamFolderUpdateSyncSettingsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamTeamFolderMetadata>, Error.<TeamTeamFolderUpdateSyncSettingsError>>}
-   */
-
-
-  routes.teamTeamFolderUpdateSyncSettings = function (arg) {
-    return this.request('team/team_folder/update_sync_settings', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Returns the member profile of the admin who generated the team access token
-   * used to make the call.
-   * @function Dropbox#teamTokenGetAuthenticatedAdmin
-   * @returns {Promise.<DropboxResponse<TeamTokenGetAuthenticatedAdminResult>, Error.<TeamTokenGetAuthenticatedAdminError>>}
-   */
-
-
-  routes.teamTokenGetAuthenticatedAdmin = function () {
-    return this.request('team/token/get_authenticated_admin', null, 'team', 'api', 'rpc');
-  };
-  /**
-   * Retrieves team events. If the result's GetTeamEventsResult.has_more field is
-   * true, call get_events/continue with the returned cursor to retrieve more
-   * entries. If end_time is not specified in your request, you may use the
-   * returned cursor to poll get_events/continue for new events. Many attributes
-   * note 'may be missing due to historical data gap'. Note that the
-   * file_operations category and & analogous paper events are not available on
-   * all Dropbox Business plans /business/plans-comparison. Use
-   * features/get_values
-   * /developers/documentation/http/teams#team-features-get_values to check for
-   * this feature. Permission : Team Auditing.
-   * @function Dropbox#teamLogGetEvents
-   * @arg {TeamLogGetTeamEventsArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamLogGetTeamEventsResult>, Error.<TeamLogGetTeamEventsError>>}
-   */
-
-
-  routes.teamLogGetEvents = function (arg) {
-    return this.request('team_log/get_events', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Once a cursor has been retrieved from get_events, use this to paginate
-   * through all events. Permission : Team Auditing.
-   * @function Dropbox#teamLogGetEventsContinue
-   * @arg {TeamLogGetTeamEventsContinueArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<TeamLogGetTeamEventsResult>, Error.<TeamLogGetTeamEventsContinueError>>}
-   */
-
-
-  routes.teamLogGetEventsContinue = function (arg) {
-    return this.request('team_log/get_events/continue', arg, 'team', 'api', 'rpc');
-  };
-  /**
-   * Get a list of feature values that may be configured for the current account.
-   * @function Dropbox#usersFeaturesGetValues
-   * @arg {UsersUserFeaturesGetValuesBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<UsersUserFeaturesGetValuesBatchResult>, Error.<UsersUserFeaturesGetValuesBatchError>>}
-   */
-
-
-  routes.usersFeaturesGetValues = function (arg) {
-    return this.request('users/features/get_values', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get information about a user's account.
-   * @function Dropbox#usersGetAccount
-   * @arg {UsersGetAccountArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<UsersBasicAccount>, Error.<UsersGetAccountError>>}
-   */
-
-
-  routes.usersGetAccount = function (arg) {
-    return this.request('users/get_account', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get information about multiple user accounts.  At most 300 accounts may be
-   * queried per request.
-   * @function Dropbox#usersGetAccountBatch
-   * @arg {UsersGetAccountBatchArg} arg - The request parameters.
-   * @returns {Promise.<DropboxResponse<Object>, Error.<UsersGetAccountBatchError>>}
-   */
-
-
-  routes.usersGetAccountBatch = function (arg) {
-    return this.request('users/get_account_batch', arg, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get information about the current user's account.
-   * @function Dropbox#usersGetCurrentAccount
-   * @returns {Promise.<DropboxResponse<UsersFullAccount>, Error.<void>>}
-   */
-
-
-  routes.usersGetCurrentAccount = function () {
-    return this.request('users/get_current_account', null, 'user', 'api', 'rpc');
-  };
-  /**
-   * Get the space usage information for the current user's account.
-   * @function Dropbox#usersGetSpaceUsage
-   * @returns {Promise.<DropboxResponse<UsersSpaceUsage>, Error.<void>>}
-   */
-
-
-  routes.usersGetSpaceUsage = function () {
-    return this.request('users/get_space_usage', null, 'user', 'api', 'rpc');
-  };
-
-  function getSafeUnicode(c) {
-    var unicode = "000".concat(c.charCodeAt(0).toString(16)).slice(-4);
-    return "\\u".concat(unicode);
+}
+function _createClass(Constructor, protoProps, staticProps) {
+  if (protoProps)
+    _defineProperties(Constructor.prototype, protoProps);
+  if (staticProps)
+    _defineProperties(Constructor, staticProps);
+  return Constructor;
+}
+var fetch;
+if (isBrowserEnv()) {
+  fetch = window.fetch.bind(window);
+} else {
+  fetch = require("node-fetch");
+}
+var crypto;
+if (isBrowserEnv()) {
+  crypto = window.crypto || window.msCrypto;
+} else {
+  crypto = require("crypto");
+}
+var Encoder;
+if (typeof TextEncoder === "undefined") {
+  Encoder = require("util").TextEncoder;
+} else {
+  Encoder = TextEncoder;
+}
+var TokenExpirationBuffer = 300 * 1e3;
+var PKCELength = 128;
+var TokenAccessTypes = ["legacy", "offline", "online"];
+var GrantTypes = ["code", "token"];
+var IncludeGrantedScopes = ["none", "user", "team"];
+var DropboxAuth = /* @__PURE__ */ function() {
+  function DropboxAuth2(options) {
+    _classCallCheck$2(this, DropboxAuth2);
+    options = options || {};
+    this.fetch = options.fetch || fetch;
+    this.accessToken = options.accessToken;
+    this.accessTokenExpiresAt = options.accessTokenExpiresAt;
+    this.refreshToken = options.refreshToken;
+    this.clientId = options.clientId;
+    this.clientSecret = options.clientSecret;
+    this.domain = options.domain;
+    this.domainDelimiter = options.domainDelimiter;
   }
-
-  var baseApiUrl = function baseApiUrl(subdomain) {
-    var domain = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : DEFAULT_API_DOMAIN;
-    var domainDelimiter = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : '.';
-
-    if (domain !== DEFAULT_API_DOMAIN && TEST_DOMAIN_MAPPINGS[subdomain] !== undefined) {
-      subdomain = TEST_DOMAIN_MAPPINGS[subdomain];
-      domainDelimiter = '-';
+  _createClass(DropboxAuth2, [{
+    key: "setAccessToken",
+    value: function setAccessToken(accessToken) {
+      this.accessToken = accessToken;
     }
-
-    return "https://".concat(subdomain).concat(domainDelimiter).concat(domain, "/2/");
-  };
-  var OAuth2AuthorizationUrl = function OAuth2AuthorizationUrl() {
-    var domain = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : DEFAULT_DOMAIN;
-
-    if (domain !== DEFAULT_DOMAIN) {
-      domain = "meta-".concat(domain);
+  }, {
+    key: "getAccessToken",
+    value: function getAccessToken() {
+      return this.accessToken;
     }
-
-    return "https://".concat(domain, "/oauth2/authorize");
-  };
-  var OAuth2TokenUrl = function OAuth2TokenUrl() {
-    var domain = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : DEFAULT_API_DOMAIN;
-    var domainDelimiter = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : '.';
-    var subdomain = 'api';
-
-    if (domain !== DEFAULT_API_DOMAIN) {
-      subdomain = TEST_DOMAIN_MAPPINGS[subdomain];
-      domainDelimiter = '-';
+  }, {
+    key: "setClientId",
+    value: function setClientId(clientId) {
+      this.clientId = clientId;
     }
-
-    return "https://".concat(subdomain).concat(domainDelimiter).concat(domain, "/oauth2/token");
-  }; // source https://www.dropboxforum.com/t5/API-support/HTTP-header-quot-Dropbox-API-Arg-quot-could-not-decode-input-as/m-p/173823/highlight/true#M6786
-
-  function httpHeaderSafeJson(args) {
-    return JSON.stringify(args).replace(/[\u007f-\uffff]/g, getSafeUnicode);
-  }
-  function getTokenExpiresAtDate(expiresIn) {
-    return new Date(Date.now() + expiresIn * 1000);
-  }
-  /* global WorkerGlobalScope */
-
-  function isWindowOrWorker() {
-    return typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope // eslint-disable-line no-restricted-globals
-    || typeof module === 'undefined' || typeof window !== 'undefined';
-  }
-  function isBrowserEnv() {
-    return typeof window !== 'undefined';
-  }
-  function createBrowserSafeString(toBeConverted) {
-    var convertedString = toBeConverted.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-    return convertedString;
-  }
-
-  /**
-   * The response class of HTTP errors from API calls using the Dropbox SDK.
-   * @class DropboxResponseError
-   * @classdesc The response class of HTTP errors from API calls using the Dropbox SDK.
-   * @arg {number} status - HTTP Status code of the call
-   * @arg {Object} headers - Headers returned from the call
-   * @arg {Object} error - Serialized Error of the call
-   */
-  var DropboxResponseError = /*#__PURE__*/function (_Error) {
-    _inherits(DropboxResponseError, _Error);
-
-    var _super = _createSuper(DropboxResponseError);
-
-    function DropboxResponseError(status, headers, error) {
-      var _this;
-
-      _classCallCheck(this, DropboxResponseError);
-
-      _this = _super.call(this, "Response failed with a ".concat(status, " code"));
-      _this.name = 'DropboxResponseError';
-      _this.status = status;
-      _this.headers = headers;
-      _this.error = error;
-      return _this;
+  }, {
+    key: "getClientId",
+    value: function getClientId() {
+      return this.clientId;
     }
-
-    return DropboxResponseError;
-  }( /*#__PURE__*/_wrapNativeSuper(Error));
-
-  var DropboxResponse = function DropboxResponse(status, headers, result) {
-    _classCallCheck(this, DropboxResponse);
-
-    this.status = status;
-    this.headers = headers;
-    this.result = result;
-  };
-
-  function throwAsError(res) {
-    return res.text().then(function (data) {
-      var errorObject;
-
-      try {
-        errorObject = JSON.parse(data);
-      } catch (error) {
-        errorObject = data;
-      }
-
-      throw new DropboxResponseError(res.status, res.headers, errorObject);
-    });
-  }
-
-  function parseResponse(res) {
-    if (!res.ok) {
-      return throwAsError(res);
+  }, {
+    key: "setClientSecret",
+    value: function setClientSecret(clientSecret) {
+      this.clientSecret = clientSecret;
     }
-
-    return res.text().then(function (data) {
-      var responseObject;
-
-      try {
-        responseObject = JSON.parse(data);
-      } catch (error) {
-        responseObject = data;
-      }
-
-      return new DropboxResponse(res.status, res.headers, responseObject);
-    });
-  }
-  function parseDownloadResponse(res) {
-    if (!res.ok) {
-      return throwAsError(res);
+  }, {
+    key: "getClientSecret",
+    value: function getClientSecret() {
+      return this.clientSecret;
     }
-
-    return new Promise(function (resolve) {
-      if (isWindowOrWorker()) {
-        res.blob().then(function (data) {
-          return resolve(data);
-        });
-      } else {
-        res.buffer().then(function (data) {
-          return resolve(data);
+  }, {
+    key: "getRefreshToken",
+    value: function getRefreshToken() {
+      return this.refreshToken;
+    }
+  }, {
+    key: "setRefreshToken",
+    value: function setRefreshToken(refreshToken) {
+      this.refreshToken = refreshToken;
+    }
+  }, {
+    key: "getAccessTokenExpiresAt",
+    value: function getAccessTokenExpiresAt() {
+      return this.accessTokenExpiresAt;
+    }
+  }, {
+    key: "setAccessTokenExpiresAt",
+    value: function setAccessTokenExpiresAt(accessTokenExpiresAt) {
+      this.accessTokenExpiresAt = accessTokenExpiresAt;
+    }
+  }, {
+    key: "setCodeVerifier",
+    value: function setCodeVerifier(codeVerifier) {
+      this.codeVerifier = codeVerifier;
+    }
+  }, {
+    key: "getCodeVerifier",
+    value: function getCodeVerifier() {
+      return this.codeVerifier;
+    }
+  }, {
+    key: "generateCodeChallenge",
+    value: function generateCodeChallenge() {
+      var _this = this;
+      var encoder = new Encoder();
+      var codeData = encoder.encode(this.codeVerifier);
+      var codeChallenge;
+      if (isBrowserEnv()) {
+        return crypto.subtle.digest("SHA-256", codeData).then(function(digestedHash2) {
+          var base64String = btoa(String.fromCharCode.apply(null, new Uint8Array(digestedHash2)));
+          codeChallenge = createBrowserSafeString(base64String).substr(0, 128);
+          _this.codeChallenge = codeChallenge;
         });
       }
-    }).then(function (data) {
-      var result = JSON.parse(res.headers.get('dropbox-api-result'));
-
-      if (isWindowOrWorker()) {
-        result.fileBlob = data;
-      } else {
-        result.fileBinary = data;
-      }
-
-      return new DropboxResponse(res.status, res.headers, result);
-    });
-  }
-
-  var fetch;
-
-  if (isBrowserEnv()) {
-    fetch = window.fetch.bind(window);
-  } else {
-    fetch = fetch; // eslint-disable-line global-require
-  }
-
-  var crypto;
-
-  if (isBrowserEnv()) {
-    crypto = window.crypto || window.msCrypto; // for IE11
-  } else {
-    crypto = crypto; // eslint-disable-line global-require
-  }
-
-  var Encoder;
-
-  if (typeof TextEncoder === 'undefined') {
-    Encoder = TextEncoder; // eslint-disable-line global-require
-  } else {
-    Encoder = TextEncoder;
-  } // Expiration is 300 seconds but needs to be in milliseconds for Date object
-
-
-  var TokenExpirationBuffer = 300 * 1000;
-  var PKCELength = 128;
-  var TokenAccessTypes = ['legacy', 'offline', 'online'];
-  var GrantTypes = ['code', 'token'];
-  var IncludeGrantedScopes = ['none', 'user', 'team'];
-  /**
-   * @class DropboxAuth
-   * @classdesc The DropboxAuth class that provides methods to manage, acquire, and refresh tokens.
-   * @arg {Object} options
-   * @arg {Function} [options.fetch] - fetch library for making requests.
-   * @arg {String} [options.accessToken] - An access token for making authenticated
-   * requests.
-   * @arg {Date} [options.AccessTokenExpiresAt] - Date of the current access token's
-   * expiration (if available)
-   * @arg {String} [options.refreshToken] - A refresh token for retrieving access tokens
-   * @arg {String} [options.clientId] - The client id for your app. Used to create
-   * authentication URL.
-   * @arg {String} [options.clientSecret] - The client secret for your app. Used to create
-   * authentication URL and refresh access tokens.
-   * @arg {String} [options.domain] - A custom domain to use when making api requests. This
-   * should only be used for testing as scaffolding to avoid making network requests.
-   * @arg {String} [options.domainDelimiter] - A custom delimiter to use when separating domain from
-   * subdomain. This should only be used for testing as scaffolding.
-   */
-
-  var DropboxAuth = /*#__PURE__*/function () {
-    function DropboxAuth(options) {
-      _classCallCheck(this, DropboxAuth);
-
-      options = options || {};
-      this.fetch = options.fetch || fetch;
-      this.accessToken = options.accessToken;
-      this.accessTokenExpiresAt = options.accessTokenExpiresAt;
-      this.refreshToken = options.refreshToken;
-      this.clientId = options.clientId;
-      this.clientSecret = options.clientSecret;
-      this.domain = options.domain;
-      this.domainDelimiter = options.domainDelimiter;
+      var digestedHash = crypto.createHash("sha256").update(codeData).digest();
+      codeChallenge = createBrowserSafeString(digestedHash);
+      this.codeChallenge = codeChallenge;
+      return Promise.resolve();
     }
-    /**
-       * Set the access token used to authenticate requests to the API.
-       * @arg {String} accessToken - An access token
-       * @returns {undefined}
-       */
-
-
-    _createClass(DropboxAuth, [{
-      key: "setAccessToken",
-      value: function setAccessToken(accessToken) {
-        this.accessToken = accessToken;
+  }, {
+    key: "generatePKCECodes",
+    value: function generatePKCECodes() {
+      var codeVerifier;
+      if (isBrowserEnv()) {
+        var array = new Uint8Array(PKCELength);
+        var randomValueArray = crypto.getRandomValues(array);
+        var base64String = btoa(randomValueArray);
+        codeVerifier = createBrowserSafeString(base64String).substr(0, 128);
+      } else {
+        var randomBytes = crypto.randomBytes(PKCELength);
+        codeVerifier = createBrowserSafeString(randomBytes).substr(0, 128);
       }
-      /**
-         * Get the access token
-         * @returns {String} Access token
-         */
-
-    }, {
-      key: "getAccessToken",
-      value: function getAccessToken() {
-        return this.accessToken;
+      this.codeVerifier = codeVerifier;
+      return this.generateCodeChallenge();
+    }
+  }, {
+    key: "getAuthenticationUrl",
+    value: function getAuthenticationUrl(redirectUri, state) {
+      var _this2 = this;
+      var authType = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : "token";
+      var tokenAccessType = arguments.length > 3 && arguments[3] !== void 0 ? arguments[3] : null;
+      var scope = arguments.length > 4 && arguments[4] !== void 0 ? arguments[4] : null;
+      var includeGrantedScopes = arguments.length > 5 && arguments[5] !== void 0 ? arguments[5] : "none";
+      var usePKCE = arguments.length > 6 && arguments[6] !== void 0 ? arguments[6] : false;
+      var clientId = this.getClientId();
+      var baseUrl = OAuth2AuthorizationUrl(this.domain);
+      if (!clientId) {
+        throw new Error("A client id is required. You can set the client id using .setClientId().");
       }
-      /**
-         * Set the client id, which is used to help gain an access token.
-         * @arg {String} clientId - Your apps client id
-         * @returns {undefined}
-         */
-
-    }, {
-      key: "setClientId",
-      value: function setClientId(clientId) {
-        this.clientId = clientId;
+      if (authType !== "code" && !redirectUri) {
+        throw new Error("A redirect uri is required.");
       }
-      /**
-         * Get the client id
-         * @returns {String} Client id
-         */
-
-    }, {
-      key: "getClientId",
-      value: function getClientId() {
-        return this.clientId;
+      if (!GrantTypes.includes(authType)) {
+        throw new Error("Authorization type must be code or token");
       }
-      /**
-         * Set the client secret
-         * @arg {String} clientSecret - Your app's client secret
-         * @returns {undefined}
-         */
-
-    }, {
-      key: "setClientSecret",
-      value: function setClientSecret(clientSecret) {
-        this.clientSecret = clientSecret;
+      if (tokenAccessType && !TokenAccessTypes.includes(tokenAccessType)) {
+        throw new Error("Token Access Type must be legacy, offline, or online");
       }
-      /**
-         * Get the client secret
-         * @returns {String} Client secret
-         */
-
-    }, {
-      key: "getClientSecret",
-      value: function getClientSecret() {
-        return this.clientSecret;
+      if (scope && !(scope instanceof Array)) {
+        throw new Error("Scope must be an array of strings");
       }
-      /**
-         * Gets the refresh token
-         * @returns {String} Refresh token
-         */
-
-    }, {
-      key: "getRefreshToken",
-      value: function getRefreshToken() {
-        return this.refreshToken;
+      if (!IncludeGrantedScopes.includes(includeGrantedScopes)) {
+        throw new Error("includeGrantedScopes must be none, user, or team");
       }
-      /**
-         * Sets the refresh token
-         * @param refreshToken - A refresh token
-         */
-
-    }, {
-      key: "setRefreshToken",
-      value: function setRefreshToken(refreshToken) {
-        this.refreshToken = refreshToken;
+      var authUrl;
+      if (authType === "code") {
+        authUrl = "".concat(baseUrl, "?response_type=code&client_id=").concat(clientId);
+      } else {
+        authUrl = "".concat(baseUrl, "?response_type=token&client_id=").concat(clientId);
       }
-      /**
-         * Gets the access token's expiration date
-         * @returns {Date} date of token expiration
-         */
-
-    }, {
-      key: "getAccessTokenExpiresAt",
-      value: function getAccessTokenExpiresAt() {
-        return this.accessTokenExpiresAt;
+      if (redirectUri) {
+        authUrl += "&redirect_uri=".concat(redirectUri);
       }
-      /**
-         * Sets the access token's expiration date
-         * @param accessTokenExpiresAt - new expiration date
-         */
-
-    }, {
-      key: "setAccessTokenExpiresAt",
-      value: function setAccessTokenExpiresAt(accessTokenExpiresAt) {
-        this.accessTokenExpiresAt = accessTokenExpiresAt;
+      if (state) {
+        authUrl += "&state=".concat(state);
       }
-      /**
-         * Sets the code verifier for PKCE flow
-         * @param {String} codeVerifier - new code verifier
-         */
-
-    }, {
-      key: "setCodeVerifier",
-      value: function setCodeVerifier(codeVerifier) {
-        this.codeVerifier = codeVerifier;
+      if (tokenAccessType) {
+        authUrl += "&token_access_type=".concat(tokenAccessType);
       }
-      /**
-         * Gets the code verifier for PKCE flow
-         * @returns {String} - code verifier for PKCE
-         */
-
-    }, {
-      key: "getCodeVerifier",
-      value: function getCodeVerifier() {
-        return this.codeVerifier;
+      if (scope) {
+        authUrl += "&scope=".concat(scope.join(" "));
       }
-    }, {
-      key: "generateCodeChallenge",
-      value: function generateCodeChallenge() {
-        var _this = this;
-
-        var encoder = new Encoder();
-        var codeData = encoder.encode(this.codeVerifier);
-        var codeChallenge;
-
-        if (isBrowserEnv()) {
-          return crypto.subtle.digest('SHA-256', codeData).then(function (digestedHash) {
-            var base64String = btoa(String.fromCharCode.apply(null, new Uint8Array(digestedHash)));
-            codeChallenge = createBrowserSafeString(base64String).substr(0, 128);
-            _this.codeChallenge = codeChallenge;
-          });
-        }
-
-        var digestedHash = crypto.createHash('sha256').update(codeData).digest();
-        codeChallenge = createBrowserSafeString(digestedHash);
-        this.codeChallenge = codeChallenge;
-        return Promise.resolve();
+      if (includeGrantedScopes !== "none") {
+        authUrl += "&include_granted_scopes=".concat(includeGrantedScopes);
       }
-    }, {
-      key: "generatePKCECodes",
-      value: function generatePKCECodes() {
-        var codeVerifier;
-
-        if (isBrowserEnv()) {
-          var array = new Uint8Array(PKCELength);
-          var randomValueArray = crypto.getRandomValues(array);
-          var base64String = btoa(randomValueArray);
-          codeVerifier = createBrowserSafeString(base64String).substr(0, 128);
-        } else {
-          var randomBytes = crypto.randomBytes(PKCELength);
-          codeVerifier = createBrowserSafeString(randomBytes).substr(0, 128);
-        }
-
-        this.codeVerifier = codeVerifier;
-        return this.generateCodeChallenge();
+      if (usePKCE) {
+        return this.generatePKCECodes().then(function() {
+          authUrl += "&code_challenge_method=S256";
+          authUrl += "&code_challenge=".concat(_this2.codeChallenge);
+          return authUrl;
+        });
       }
-      /**
-         * Get a URL that can be used to authenticate users for the Dropbox API.
-         * @arg {String} redirectUri - A URL to redirect the user to after
-         * authenticating. This must be added to your app through the admin interface.
-         * @arg {String} [state] - State that will be returned in the redirect URL to help
-         * prevent cross site scripting attacks.
-         * @arg {String} [authType] - auth type, defaults to 'token', other option is 'code'
-         * @arg {String} [tokenAccessType] - type of token to request.  From the following:
-         * null - creates a token with the app default (either legacy or online)
-         * legacy - creates one long-lived token with no expiration
-         * online - create one short-lived token with an expiration
-         * offline - create one short-lived token with an expiration with a refresh token
-         * @arg {Array<String>} [scope] - scopes to request for the grant
-         * @arg {String} [includeGrantedScopes] - whether or not to include previously granted scopes.
-         * From the following:
-         * user - include user scopes in the grant
-         * team - include team scopes in the grant
-         * Note: if this user has never linked the app, include_granted_scopes must be None
-         * @arg {boolean} [usePKCE] - Whether or not to use Sha256 based PKCE. PKCE should be only use
-         * on client apps which doesn't call your server. It is less secure than non-PKCE flow but
-         * can be used if you are unable to safely retrieve your app secret
-         * @returns {Promise<String>} - Url to send user to for Dropbox API authentication
-         * returned in a promise
-         */
-
-    }, {
-      key: "getAuthenticationUrl",
-      value: function getAuthenticationUrl(redirectUri, state) {
-        var _this2 = this;
-
-        var authType = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 'token';
-        var tokenAccessType = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : null;
-        var scope = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : null;
-        var includeGrantedScopes = arguments.length > 5 && arguments[5] !== undefined ? arguments[5] : 'none';
-        var usePKCE = arguments.length > 6 && arguments[6] !== undefined ? arguments[6] : false;
-        var clientId = this.getClientId();
-        var baseUrl = OAuth2AuthorizationUrl(this.domain);
-
-        if (!clientId) {
-          throw new Error('A client id is required. You can set the client id using .setClientId().');
-        }
-
-        if (authType !== 'code' && !redirectUri) {
-          throw new Error('A redirect uri is required.');
-        }
-
-        if (!GrantTypes.includes(authType)) {
-          throw new Error('Authorization type must be code or token');
-        }
-
-        if (tokenAccessType && !TokenAccessTypes.includes(tokenAccessType)) {
-          throw new Error('Token Access Type must be legacy, offline, or online');
-        }
-
-        if (scope && !(scope instanceof Array)) {
-          throw new Error('Scope must be an array of strings');
-        }
-
-        if (!IncludeGrantedScopes.includes(includeGrantedScopes)) {
-          throw new Error('includeGrantedScopes must be none, user, or team');
-        }
-
-        var authUrl;
-
-        if (authType === 'code') {
-          authUrl = "".concat(baseUrl, "?response_type=code&client_id=").concat(clientId);
-        } else {
-          authUrl = "".concat(baseUrl, "?response_type=token&client_id=").concat(clientId);
-        }
-
-        if (redirectUri) {
-          authUrl += "&redirect_uri=".concat(redirectUri);
-        }
-
-        if (state) {
-          authUrl += "&state=".concat(state);
-        }
-
-        if (tokenAccessType) {
-          authUrl += "&token_access_type=".concat(tokenAccessType);
-        }
-
-        if (scope) {
-          authUrl += "&scope=".concat(scope.join(' '));
-        }
-
-        if (includeGrantedScopes !== 'none') {
-          authUrl += "&include_granted_scopes=".concat(includeGrantedScopes);
-        }
-
-        if (usePKCE) {
-          return this.generatePKCECodes().then(function () {
-            authUrl += '&code_challenge_method=S256';
-            authUrl += "&code_challenge=".concat(_this2.codeChallenge);
-            return authUrl;
-          });
-        }
-
-        return Promise.resolve(authUrl);
+      return Promise.resolve(authUrl);
+    }
+  }, {
+    key: "getAccessTokenFromCode",
+    value: function getAccessTokenFromCode(redirectUri, code) {
+      var clientId = this.getClientId();
+      var clientSecret = this.getClientSecret();
+      if (!clientId) {
+        throw new Error("A client id is required. You can set the client id using .setClientId().");
       }
-      /**
-         * Get an OAuth2 access token from an OAuth2 Code.
-         * @arg {String} redirectUri - A URL to redirect the user to after
-         * authenticating. This must be added to your app through the admin interface.
-         * @arg {String} code - An OAuth2 code.
-         * @returns {Object} An object containing the token and related info (if applicable)
-         */
-
-    }, {
-      key: "getAccessTokenFromCode",
-      value: function getAccessTokenFromCode(redirectUri, code) {
-        var clientId = this.getClientId();
-        var clientSecret = this.getClientSecret();
-
-        if (!clientId) {
-          throw new Error('A client id is required. You can set the client id using .setClientId().');
+      var path = OAuth2TokenUrl(this.domain, this.domainDelimiter);
+      path += "?grant_type=authorization_code";
+      path += "&code=".concat(code);
+      path += "&client_id=".concat(clientId);
+      if (clientSecret) {
+        path += "&client_secret=".concat(clientSecret);
+      } else {
+        if (!this.codeVerifier) {
+          throw new Error("You must use PKCE when generating the authorization URL to not include a client secret");
         }
-
-        var path = OAuth2TokenUrl(this.domain, this.domainDelimiter);
-        path += '?grant_type=authorization_code';
-        path += "&code=".concat(code);
-        path += "&client_id=".concat(clientId);
-
-        if (clientSecret) {
-          path += "&client_secret=".concat(clientSecret);
-        } else {
-          if (!this.codeVerifier) {
-            throw new Error('You must use PKCE when generating the authorization URL to not include a client secret');
-          }
-
-          path += "&code_verifier=".concat(this.codeVerifier);
+        path += "&code_verifier=".concat(this.codeVerifier);
+      }
+      if (redirectUri) {
+        path += "&redirect_uri=".concat(redirectUri);
+      }
+      var fetchOptions = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
         }
-
-        if (redirectUri) {
-          path += "&redirect_uri=".concat(redirectUri);
+      };
+      return this.fetch(path, fetchOptions).then(function(res) {
+        return parseResponse(res);
+      });
+    }
+  }, {
+    key: "checkAndRefreshAccessToken",
+    value: function checkAndRefreshAccessToken() {
+      var canRefresh = this.getRefreshToken() && this.getClientId();
+      var needsRefresh = !this.getAccessTokenExpiresAt() || new Date(Date.now() + TokenExpirationBuffer) >= this.getAccessTokenExpiresAt();
+      var needsToken = !this.getAccessToken();
+      if ((needsRefresh || needsToken) && canRefresh) {
+        return this.refreshAccessToken();
+      }
+      return Promise.resolve();
+    }
+  }, {
+    key: "refreshAccessToken",
+    value: function refreshAccessToken() {
+      var _this3 = this;
+      var scope = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : null;
+      var refreshUrl = OAuth2TokenUrl(this.domain, this.domainDelimiter);
+      var clientId = this.getClientId();
+      var clientSecret = this.getClientSecret();
+      if (!clientId) {
+        throw new Error("A client id is required. You can set the client id using .setClientId().");
+      }
+      if (scope && !(scope instanceof Array)) {
+        throw new Error("Scope must be an array of strings");
+      }
+      var headers = {};
+      headers["Content-Type"] = "application/json";
+      refreshUrl += "?grant_type=refresh_token&refresh_token=".concat(this.getRefreshToken());
+      refreshUrl += "&client_id=".concat(clientId);
+      if (clientSecret) {
+        refreshUrl += "&client_secret=".concat(clientSecret);
+      }
+      if (scope) {
+        refreshUrl += "&scope=".concat(scope.join(" "));
+      }
+      var fetchOptions = {
+        method: "POST"
+      };
+      fetchOptions.headers = headers;
+      return this.fetch(refreshUrl, fetchOptions).then(function(res) {
+        return parseResponse(res);
+      }).then(function(res) {
+        _this3.setAccessToken(res.result.access_token);
+        _this3.setAccessTokenExpiresAt(getTokenExpiresAtDate(res.result.expires_in));
+      });
+    }
+  }]);
+  return DropboxAuth2;
+}();
+function _classCallCheck$3(instance, Constructor) {
+  if (!(instance instanceof Constructor)) {
+    throw new TypeError("Cannot call a class as a function");
+  }
+}
+function _defineProperties$1(target, props) {
+  for (var i = 0; i < props.length; i++) {
+    var descriptor = props[i];
+    descriptor.enumerable = descriptor.enumerable || false;
+    descriptor.configurable = true;
+    if ("value" in descriptor)
+      descriptor.writable = true;
+    Object.defineProperty(target, descriptor.key, descriptor);
+  }
+}
+function _createClass$1(Constructor, protoProps, staticProps) {
+  if (protoProps)
+    _defineProperties$1(Constructor.prototype, protoProps);
+  if (staticProps)
+    _defineProperties$1(Constructor, staticProps);
+  return Constructor;
+}
+var fetch$1;
+if (typeof window !== "undefined") {
+  fetch$1 = window.fetch.bind(window);
+} else {
+  fetch$1 = require("node-fetch");
+}
+var b64 = typeof btoa === "undefined" ? function(str) {
+  return Buffer.from(str).toString("base64");
+} : btoa;
+var Dropbox = /* @__PURE__ */ function() {
+  function Dropbox2(options) {
+    _classCallCheck$3(this, Dropbox2);
+    options = options || {};
+    if (options.auth) {
+      this.auth = options.auth;
+    } else {
+      this.auth = new DropboxAuth(options);
+    }
+    this.fetch = options.fetch || fetch$1;
+    this.selectUser = options.selectUser;
+    this.selectAdmin = options.selectAdmin;
+    this.pathRoot = options.pathRoot;
+    this.domain = options.domain;
+    this.domainDelimiter = options.domainDelimiter;
+    Object.assign(this, routes);
+  }
+  _createClass$1(Dropbox2, [{
+    key: "request",
+    value: function request(path, args, auth, host, style) {
+      if (auth.split(",").length > 1) {
+        var authTypes = auth.replace(" ", "").split(",");
+        if (authTypes.includes(USER_AUTH) && this.auth.getAccessToken()) {
+          auth = USER_AUTH;
+        } else if (authTypes.includes(TEAM_AUTH) && this.auth.getAccessToken()) {
+          auth = TEAM_AUTH;
+        } else if (authTypes.includes(APP_AUTH)) {
+          auth = APP_AUTH;
         }
-
+      }
+      switch (style) {
+        case RPC:
+          return this.rpcRequest(path, args, auth, host);
+        case DOWNLOAD:
+          return this.downloadRequest(path, args, auth, host);
+        case UPLOAD:
+          return this.uploadRequest(path, args, auth, host);
+        default:
+          throw new Error("Invalid request style: ".concat(style));
+      }
+    }
+  }, {
+    key: "rpcRequest",
+    value: function rpcRequest(path, body, auth, host) {
+      var _this = this;
+      return this.auth.checkAndRefreshAccessToken().then(function() {
         var fetchOptions = {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
+          method: "POST",
+          body: body ? JSON.stringify(body) : null,
+          headers: {}
         };
-        return this.fetch(path, fetchOptions).then(function (res) {
-          return parseResponse(res);
-        });
-      }
-      /**
-         * Checks if a token is needed, can be refreshed and if the token is expired.
-         * If so, attempts to refresh access token
-         * @returns {Promise<*>}
-         */
-
-    }, {
-      key: "checkAndRefreshAccessToken",
-      value: function checkAndRefreshAccessToken() {
-        var canRefresh = this.getRefreshToken() && this.getClientId();
-        var needsRefresh = !this.getAccessTokenExpiresAt() || new Date(Date.now() + TokenExpirationBuffer) >= this.getAccessTokenExpiresAt();
-        var needsToken = !this.getAccessToken();
-
-        if ((needsRefresh || needsToken) && canRefresh) {
-          return this.refreshAccessToken();
+        if (body) {
+          fetchOptions.headers["Content-Type"] = "application/json";
         }
-
-        return Promise.resolve();
-      }
-      /**
-         * Refreshes the access token using the refresh token, if available
-         * @arg {Array<String>} scope - a subset of scopes from the original
-         * refresh to acquire with an access token
-         * @returns {Promise<*>}
-         */
-
-    }, {
-      key: "refreshAccessToken",
-      value: function refreshAccessToken() {
-        var _this3 = this;
-
-        var scope = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : null;
-        var refreshUrl = OAuth2TokenUrl(this.domain, this.domainDelimiter);
-        var clientId = this.getClientId();
-        var clientSecret = this.getClientSecret();
-
-        if (!clientId) {
-          throw new Error('A client id is required. You can set the client id using .setClientId().');
-        }
-
-        if (scope && !(scope instanceof Array)) {
-          throw new Error('Scope must be an array of strings');
-        }
-
-        var headers = {};
-        headers['Content-Type'] = 'application/json';
-        refreshUrl += "?grant_type=refresh_token&refresh_token=".concat(this.getRefreshToken());
-        refreshUrl += "&client_id=".concat(clientId);
-
-        if (clientSecret) {
-          refreshUrl += "&client_secret=".concat(clientSecret);
-        }
-
-        if (scope) {
-          refreshUrl += "&scope=".concat(scope.join(' '));
-        }
-
-        var fetchOptions = {
-          method: 'POST'
-        };
-        fetchOptions.headers = headers;
-        return this.fetch(refreshUrl, fetchOptions).then(function (res) {
-          return parseResponse(res);
-        }).then(function (res) {
-          _this3.setAccessToken(res.result.access_token);
-
-          _this3.setAccessTokenExpiresAt(getTokenExpiresAtDate(res.result.expires_in));
-        });
-      }
-      /**
-         * An authentication process that works with cordova applications.
-         * @param {successCallback} successCallback
-         * @param {errorCallback} errorCallback
-         */
-
-    }, {
-      key: "authenticateWithCordova",
-      value: function authenticateWithCordova(successCallback, errorCallback) {
-        var redirectUrl = 'https://www.dropbox.com/1/oauth2/redirect_receiver';
-        this.getAuthenticationUrl(redirectUrl).then(function (url) {
-          var removed = false;
-          var browser = window.open(url, '_blank');
-
-          function onLoadError(event) {
-            // Workaround to fix wrong behavior on cordova-plugin-inappbrowser
-            if (event.code !== -999) {
-              // Try to avoid a browser crash on browser.close().
-              window.setTimeout(function () {
-                browser.close();
-              }, 10);
-              errorCallback();
+        var authHeader;
+        switch (auth) {
+          case APP_AUTH:
+            if (!_this.auth.clientId || !_this.auth.clientSecret) {
+              throw new Error("A client id and secret is required for this function");
             }
-          }
-
-          function onLoadStop(event) {
-            var errorLabel = '&error=';
-            var errorIndex = event.url.indexOf(errorLabel);
-
-            if (errorIndex > -1) {
-              // Try to avoid a browser crash on browser.close().
-              window.setTimeout(function () {
-                browser.close();
-              }, 10);
-              errorCallback();
-            } else {
-              var tokenLabel = '#access_token=';
-              var tokenIndex = event.url.indexOf(tokenLabel);
-              var tokenTypeIndex = event.url.indexOf('&token_type=');
-
-              if (tokenIndex > -1) {
-                tokenIndex += tokenLabel.length; // Try to avoid a browser crash on browser.close().
-
-                window.setTimeout(function () {
-                  browser.close();
-                }, 10);
-                var accessToken = event.url.substring(tokenIndex, tokenTypeIndex);
-                successCallback(accessToken);
-              }
-            }
-          }
-
-          function onExit() {
-            if (removed) {
-              return;
-            }
-
-            browser.removeEventListener('loaderror', onLoadError);
-            browser.removeEventListener('loadstop', onLoadStop);
-            browser.removeEventListener('exit', onExit);
-            removed = true;
-          }
-
-          browser.addEventListener('loaderror', onLoadError);
-          browser.addEventListener('loadstop', onLoadStop);
-          browser.addEventListener('exit', onExit);
-        });
-      }
-    }]);
-
-    return DropboxAuth;
-  }();
-
-  var fetch$1;
-
-  if (typeof window !== 'undefined') {
-    fetch$1 = window.fetch.bind(window);
-  } else {
-    fetch$1 = fetch; // eslint-disable-line global-require
-  }
-
-  var b64 = typeof btoa === 'undefined' ? function (str) {
-    return Buffer.from(str).toString('base64');
-  } : btoa;
-  /**
-   * @class Dropbox
-   * @classdesc The Dropbox SDK class that provides methods to read, write and
-   * create files or folders in a user or team's Dropbox.
-   * @arg {Object} options
-   * @arg {Function} [options.fetch] - fetch library for making requests.
-   * @arg {String} [options.selectUser] - Select user is only used for team functionality.
-   * It specifies which user the team access token should be acting as.
-   * @arg {String} [options.pathRoot] - root path to access other namespaces
-   * Use to access team folders for example
-   * @arg {String} [options.selectAdmin] - Select admin is only used by team functionality.
-   * It specifies which team admin the team access token should be acting as.
-   * @arg {DropboxAuth} [options.auth] - The DropboxAuth object used to authenticate requests.
-   * If this is set, the remaining parameters will be ignored.
-   * @arg {String} [options.accessToken] - An access token for making authenticated
-   * requests.
-   * @arg {Date} [options.accessTokenExpiresAt] - Date of the current access token's
-   * expiration (if available)
-   * @arg {String} [options.refreshToken] - A refresh token for retrieving access tokens
-   * @arg {String} [options.clientId] - The client id for your app. Used to create
-   * authentication URL.
-   * @arg {String} [options.clientSecret] - The client secret for your app. Used to create
-   * authentication URL and refresh access tokens.
-   * @arg {String} [options.domain] - A custom domain to use when making api requests. This
-   * should only be used for testing as scaffolding to avoid making network requests.
-   * @arg {String} [options.domainDelimiter] - A custom delimiter to use when separating domain from
-   * subdomain. This should only be used for testing as scaffolding.
-   */
-
-  var Dropbox = /*#__PURE__*/function () {
-    function Dropbox(options) {
-      _classCallCheck(this, Dropbox);
-
-      options = options || {};
-
-      if (options.auth) {
-        this.auth = options.auth;
-      } else {
-        this.auth = new DropboxAuth(options);
-      }
-
-      this.fetch = options.fetch || fetch$1;
-      this.selectUser = options.selectUser;
-      this.selectAdmin = options.selectAdmin;
-      this.pathRoot = options.pathRoot;
-      this.domain = options.domain;
-      this.domainDelimiter = options.domainDelimiter;
-      Object.assign(this, routes);
-    }
-
-    _createClass(Dropbox, [{
-      key: "request",
-      value: function request(path, args, auth, host, style) {
-        // checks for multiauth and assigns auth based on priority to create header in switch case
-        if (auth.split(',').length > 1) {
-          var authTypes = auth.replace(' ', '').split(',');
-
-          if (authTypes.includes(USER_AUTH) && this.auth.getAccessToken()) {
-            auth = USER_AUTH;
-          } else if (authTypes.includes(TEAM_AUTH) && this.auth.getAccessToken()) {
-            auth = TEAM_AUTH;
-          } else if (authTypes.includes(APP_AUTH)) {
-            auth = APP_AUTH;
-          }
-        }
-
-        switch (style) {
-          case RPC:
-            return this.rpcRequest(path, args, auth, host);
-
-          case DOWNLOAD:
-            return this.downloadRequest(path, args, auth, host);
-
-          case UPLOAD:
-            return this.uploadRequest(path, args, auth, host);
-
+            authHeader = b64("".concat(_this.auth.clientId, ":").concat(_this.auth.clientSecret));
+            fetchOptions.headers.Authorization = "Basic ".concat(authHeader);
+            break;
+          case TEAM_AUTH:
+          case USER_AUTH:
+            fetchOptions.headers.Authorization = "Bearer ".concat(_this.auth.getAccessToken());
+            break;
+          case NO_AUTH:
+            break;
           default:
-            throw new Error("Invalid request style: ".concat(style));
+            throw new Error("Unhandled auth type: ".concat(auth));
         }
-      }
-    }, {
-      key: "rpcRequest",
-      value: function rpcRequest(path, body, auth, host) {
-        var _this = this;
-
-        return this.auth.checkAndRefreshAccessToken().then(function () {
-          var fetchOptions = {
-            method: 'POST',
-            body: body ? JSON.stringify(body) : null,
-            headers: {}
-          };
-
-          if (body) {
-            fetchOptions.headers['Content-Type'] = 'application/json';
-          }
-
-          var authHeader;
-
-          switch (auth) {
-            case APP_AUTH:
-              if (!_this.auth.clientId || !_this.auth.clientSecret) {
-                throw new Error('A client id and secret is required for this function');
-              }
-
-              authHeader = b64("".concat(_this.auth.clientId, ":").concat(_this.auth.clientSecret));
-              fetchOptions.headers.Authorization = "Basic ".concat(authHeader);
-              break;
-
-            case TEAM_AUTH:
-            case USER_AUTH:
-              fetchOptions.headers.Authorization = "Bearer ".concat(_this.auth.getAccessToken());
-              break;
-
-            case NO_AUTH:
-              break;
-
-            default:
-              throw new Error("Unhandled auth type: ".concat(auth));
-          }
-
-          _this.setCommonHeaders(fetchOptions);
-
-          return fetchOptions;
-        }).then(function (fetchOptions) {
-          return _this.fetch(baseApiUrl(host, _this.domain, _this.domainDelimiter) + path, fetchOptions);
-        }).then(function (res) {
-          return parseResponse(res);
-        });
-      }
-    }, {
-      key: "downloadRequest",
-      value: function downloadRequest(path, args, auth, host) {
-        var _this2 = this;
-
-        return this.auth.checkAndRefreshAccessToken().then(function () {
-          if (auth !== USER_AUTH) {
-            throw new Error("Unexpected auth type: ".concat(auth));
-          }
-
-          var fetchOptions = {
-            method: 'POST',
-            headers: {
-              Authorization: "Bearer ".concat(_this2.auth.getAccessToken()),
-              'Dropbox-API-Arg': httpHeaderSafeJson(args)
-            }
-          };
-
-          _this2.setCommonHeaders(fetchOptions);
-
-          return fetchOptions;
-        }).then(function (fetchOptions) {
-          return _this2.fetch(baseApiUrl(host, _this2.domain, _this2.domainDelimiter) + path, fetchOptions);
-        }).then(function (res) {
-          return parseDownloadResponse(res);
-        });
-      }
-    }, {
-      key: "uploadRequest",
-      value: function uploadRequest(path, args, auth, host) {
-        var _this3 = this;
-
-        return this.auth.checkAndRefreshAccessToken().then(function () {
-          if (auth !== USER_AUTH) {
-            throw new Error("Unexpected auth type: ".concat(auth));
-          }
-
-          var contents = args.contents;
-          delete args.contents;
-          var fetchOptions = {
-            body: contents,
-            method: 'POST',
-            headers: {
-              Authorization: "Bearer ".concat(_this3.auth.getAccessToken()),
-              'Content-Type': 'application/octet-stream',
-              'Dropbox-API-Arg': httpHeaderSafeJson(args)
-            }
-          };
-
-          _this3.setCommonHeaders(fetchOptions);
-
-          return fetchOptions;
-        }).then(function (fetchOptions) {
-          return _this3.fetch(baseApiUrl(host, _this3.domain, _this3.domainDelimiter) + path, fetchOptions);
-        }).then(function (res) {
-          return parseResponse(res);
-        });
-      }
-    }, {
-      key: "setCommonHeaders",
-      value: function setCommonHeaders(options) {
-        if (this.selectUser) {
-          options.headers['Dropbox-API-Select-User'] = this.selectUser;
+        _this.setCommonHeaders(fetchOptions);
+        return fetchOptions;
+      }).then(function(fetchOptions) {
+        return _this.fetch(baseApiUrl(host, _this.domain, _this.domainDelimiter) + path, fetchOptions);
+      }).then(function(res) {
+        return parseResponse(res);
+      });
+    }
+  }, {
+    key: "downloadRequest",
+    value: function downloadRequest(path, args, auth, host) {
+      var _this2 = this;
+      return this.auth.checkAndRefreshAccessToken().then(function() {
+        if (auth !== USER_AUTH) {
+          throw new Error("Unexpected auth type: ".concat(auth));
         }
-
-        if (this.selectAdmin) {
-          options.headers['Dropbox-API-Select-Admin'] = this.selectAdmin;
+        var fetchOptions = {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer ".concat(_this2.auth.getAccessToken()),
+            "Dropbox-API-Arg": httpHeaderSafeJson(args)
+          }
+        };
+        _this2.setCommonHeaders(fetchOptions);
+        return fetchOptions;
+      }).then(function(fetchOptions) {
+        return _this2.fetch(baseApiUrl(host, _this2.domain, _this2.domainDelimiter) + path, fetchOptions);
+      }).then(function(res) {
+        return parseDownloadResponse(res);
+      });
+    }
+  }, {
+    key: "uploadRequest",
+    value: function uploadRequest(path, args, auth, host) {
+      var _this3 = this;
+      return this.auth.checkAndRefreshAccessToken().then(function() {
+        if (auth !== USER_AUTH) {
+          throw new Error("Unexpected auth type: ".concat(auth));
         }
-
-        if (this.pathRoot) {
-          options.headers['Dropbox-API-Path-Root'] = this.pathRoot;
-        }
+        var contents = args.contents;
+        delete args.contents;
+        var fetchOptions = {
+          body: contents,
+          method: "POST",
+          headers: {
+            Authorization: "Bearer ".concat(_this3.auth.getAccessToken()),
+            "Content-Type": "application/octet-stream",
+            "Dropbox-API-Arg": httpHeaderSafeJson(args)
+          }
+        };
+        _this3.setCommonHeaders(fetchOptions);
+        return fetchOptions;
+      }).then(function(fetchOptions) {
+        return _this3.fetch(baseApiUrl(host, _this3.domain, _this3.domainDelimiter) + path, fetchOptions);
+      }).then(function(res) {
+        return parseResponse(res);
+      });
+    }
+  }, {
+    key: "setCommonHeaders",
+    value: function setCommonHeaders(options) {
+      if (this.selectUser) {
+        options.headers["Dropbox-API-Select-User"] = this.selectUser;
       }
-    }]);
-
-    return Dropbox;
-  }();
-
-  window.Dropbox = Dropbox;
-  window.DropboxAuth = DropboxAuth;
-
-  Object.defineProperty(exports, '__esModule', { value: true });
-
-})));
-//# sourceMappingURL=Dropbox-sdk.js.map
+      if (this.selectAdmin) {
+        options.headers["Dropbox-API-Select-Admin"] = this.selectAdmin;
+      }
+      if (this.pathRoot) {
+        options.headers["Dropbox-API-Path-Root"] = this.pathRoot;
+      }
+    }
+  }]);
+  return Dropbox2;
+}();
+export {Dropbox, DropboxAuth};
+export default null;
