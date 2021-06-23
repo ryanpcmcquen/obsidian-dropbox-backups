@@ -1,4 +1,13 @@
-import { addIcon, moment, Platform, Plugin, setIcon } from "obsidian";
+import {
+    App,
+    addIcon,
+    moment,
+    Platform,
+    Plugin,
+    PluginSettingTab,
+    setIcon,
+    Setting,
+} from "obsidian";
 import { Dropbox, DropboxAuth, files } from "./assets/Dropbox-sdk.js";
 
 type accessTokenStore = {
@@ -7,6 +16,14 @@ type accessTokenStore = {
 };
 
 let dropboxBackupsCodeVerifier: string;
+
+interface DropboxBackupsPluginSettings {
+    excludeBinaryFiles: boolean;
+}
+
+const DEFAULT_SETTINGS: DropboxBackupsPluginSettings = {
+    excludeBinaryFiles: false,
+};
 
 // Call this method inside your plugin's
 // `onload` function like so:
@@ -33,7 +50,40 @@ const monkeyPatchConsole = (plugin: Plugin) => {
     console.warn = logMessages("warn");
 };
 
+class DropboxBackupsSettingTab extends PluginSettingTab {
+    plugin: DropboxBackups;
+
+    constructor(app: App, plugin: DropboxBackups) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
+
+    display(): void {
+        let { containerEl } = this;
+
+        containerEl.empty();
+
+        containerEl.createEl("h2", { text: "Dropbox Backups Settings" });
+
+        new Setting(containerEl)
+            .setName("Exclude binary files")
+            .setDesc(
+                "Exclude files without the following extensions: md, org, txt"
+            )
+            .addToggle((toggle) => {
+                toggle.setValue(this.plugin.settings.excludeBinaryFiles);
+                toggle.onChange(async (value) => {
+                    this.plugin.settings.excludeBinaryFiles = value;
+
+                    await this.plugin.saveSettings();
+                });
+            });
+    }
+}
+
 export default class DropboxBackups extends Plugin {
+    settings: DropboxBackupsPluginSettings;
+
     dbx: Dropbox;
     dbxAuth: DropboxAuth;
 
@@ -105,9 +155,24 @@ export default class DropboxBackups extends Plugin {
                     break;
                 }
                 if (this.app.vault.adapter.exists(file.path)) {
-                    const fileContents = this.couldBeBinary(file.extension)
-                        ? await this.app.vault.adapter.readBinary(file.path)
-                        : await this.app.vault.adapter.read(file.path);
+                    let fileContents;
+                    if (
+                        this.couldBeBinary(file.extension) &&
+                        this.settings.excludeBinaryFiles
+                    ) {
+                        continue;
+                    } else if (
+                        this.couldBeBinary(file.extension) &&
+                        !this.settings.excludeBinaryFiles
+                    ) {
+                        fileContents = await this.app.vault.adapter.readBinary(
+                            file.path
+                        );
+                    } else {
+                        fileContents = await this.app.vault.adapter.read(
+                            file.path
+                        );
+                    }
 
                     try {
                         await this.dbx.filesUpload({
@@ -239,9 +304,22 @@ export default class DropboxBackups extends Plugin {
         }
     }
 
+    async loadSettings() {
+        this.settings = Object.assign(
+            {},
+            DEFAULT_SETTINGS,
+            await this.loadData()
+        );
+    }
+
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
+
     async onload(): Promise<void> {
         monkeyPatchConsole(this);
         console.log("Loading Dropbox Backups plugin ...");
+        await this.loadSettings();
 
         addIcon("dropbox-backups-init", this.icons.cloudSlash);
         addIcon("dropbox-backups-start-upload", this.icons.cloudStartUpload);
@@ -250,6 +328,8 @@ export default class DropboxBackups extends Plugin {
             "dropbox-backups-upload-complete",
             this.icons.cloudUploadComplete
         );
+
+        this.addSettingTab(new DropboxBackupsSettingTab(this.app, this));
 
         if (
             await this.app.vault.adapter.exists(

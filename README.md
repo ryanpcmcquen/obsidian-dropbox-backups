@@ -40,7 +40,15 @@ The cloud with a check mark indicates that the backup is complete!
 
 Demo:
 
-![Demo](https://github.com/ryanpcmcquen/obsidian-dropbox-backups/raw/master/obsidian-dropbox-backups-demo-v1.gif)
+![Demo](https://github.com/ryanpcmcquen/obsidian-dropbox-backups/raw/master/obsidian-dropbox-backups-demo-v2.gif)
+
+### Settings
+
+A setting is available to 'Exclude binary files', this will skip any file without one of the following extensions:
+
+-   md
+-   org
+-   txt
 
 ### Dropbox permissions
 
