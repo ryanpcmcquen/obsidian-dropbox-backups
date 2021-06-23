@@ -50,6 +50,8 @@ A setting is available to 'Exclude binary files', this will skip any file withou
 -   org
 -   txt
 
+<img width="772" alt="Screen Shot 2021-06-23 at 1 57 38 PM" src="https://user-images.githubusercontent.com/772937/123167158-0fe0b900-d42b-11eb-981a-1c4703ab3891.png">
+
 ### Dropbox permissions
 
 This app requires the following Dropbox permissions:
