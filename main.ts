@@ -63,7 +63,7 @@ class DropboxBackupsSettingTab extends PluginSettingTab {
 
         containerEl.empty();
 
-        containerEl.createEl("h2", { text: "Dropbox Backups Settings" });
+        containerEl.createEl("h2", { text: "Aut-O-Backups Settings" });
 
         new Setting(containerEl)
             .setName("Exclude binary files")
@@ -318,7 +318,7 @@ export default class DropboxBackups extends Plugin {
 
     async onload(): Promise<void> {
         monkeyPatchConsole(this);
-        console.log("Loading Dropbox Backups plugin ...");
+        console.log("Loading Aut-O-Backups plugin ...");
         await this.loadSettings();
 
         addIcon("dropbox-backups-init", this.icons.cloudSlash);
@@ -380,6 +380,6 @@ export default class DropboxBackups extends Plugin {
     }
 
     onunload() {
-        console.log("Unloading Dropbox Backups plugin ...");
+        console.log("Unloading Aut-O-Backups plugin ...");
     }
 }
