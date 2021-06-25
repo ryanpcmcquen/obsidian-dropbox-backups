@@ -50,8 +50,6 @@ A setting is available to 'Exclude binary files', this will skip any file withou
 -   org
 -   txt
 
-<img width="772" alt="Screen Shot 2021-06-23 at 1 57 38 PM" src="https://user-images.githubusercontent.com/772937/123167158-0fe0b900-d42b-11eb-981a-1c4703ab3891.png">
-
 ### Dropbox permissions
 
 This app requires the following Dropbox permissions:
@@ -70,6 +68,10 @@ Any files not in this list:
 -   `txt`
 
 Are _assumed_ to be binary files, and read/uploaded as such. Please let me know if more files need to be added to this list that are actually plain text.
+
+### What happened to 'Dropbox Backups'?
+
+As of version `2.0.0`, the app was renamed to follow required branding guidelines.
 
 ### Manually installing the plugin
 
