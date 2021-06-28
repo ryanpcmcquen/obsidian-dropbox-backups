@@ -204,10 +204,13 @@ export default class DropboxBackups extends Plugin {
                 this.defaultAriaLabel + "\n" + `Last backup: ${pathPrefix}`
             );
         }
-        setIcon(
-            this.dropboxBackupsRibbonIcon,
-            "dropbox-backups-upload-complete"
-        );
+
+        if (this.currentBackupTime === now) {
+            setIcon(
+                this.dropboxBackupsRibbonIcon,
+                "dropbox-backups-upload-complete"
+            );
+        }
     }
 
     async setupAuth() {
