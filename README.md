@@ -61,13 +61,15 @@ This app requires the following Dropbox permissions:
 
 ### Known limitations
 
-Any files not in this list:
+Any files _not_ in this list:
 
 -   `md`
 -   `org`
 -   `txt`
 
-Are _assumed_ to be binary files, and read/uploaded as such. Please let me know if more files need to be added to this list that are actually plain text.
+Are uploaded as binary files.
+
+Let me know if more files need to be added to this list that are actually plain text.
 
 ### What happened to 'Dropbox Backups'?
 
