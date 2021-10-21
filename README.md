@@ -77,4 +77,4 @@ As of version `2.0.0`, the app was renamed to follow required branding guideline
 
 ### Manually installing the plugin
 
--   Copy over `main.js`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/obsidian-dropbox-backups/`.
+-   Copy over `main.js`, `manifest.json`, and `styles.css` to your vault `VaultFolder/.obsidian/plugins/obsidian-dropbox-backups/`.
