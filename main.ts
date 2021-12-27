@@ -24,6 +24,7 @@ interface DropboxBackupsPluginSettings {
 const DEFAULT_SETTINGS: DropboxBackupsPluginSettings = {
     excludeBinaryFiles: false,
 };
+const oneMinute = 60000;
 
 // Call this method inside your plugin's
 // `onload` function like so:
@@ -121,7 +122,7 @@ export default class DropboxBackups extends Plugin {
         return extension !== "md" && extension !== "org" && extension !== "txt";
     }
 
-    async backup(): Promise<void> {
+    async _backup(): Promise<void> {
         const now = Date.now();
         let finalStatus = "complete";
 
@@ -134,7 +135,7 @@ export default class DropboxBackups extends Plugin {
 
         const pathPrefix = `/${this.vaultPath}/${year}/${month}/${day}/${time}`;
 
-        const backupAttemptLogMessage = `Attempting backup to: ${pathPrefix}`;
+        const backupAttemptLogMessage = `Aut-O-Backups: Attempting backup to: ${pathPrefix}`;
         console.log(backupAttemptLogMessage);
 
         if (!Platform.isMobile && this.dropboxBackupsRibbonIcon) {
@@ -190,13 +191,13 @@ export default class DropboxBackups extends Plugin {
                             );
                         }
                     } catch (err) {
-                        console.error(err);
+                        console.error("Aut-O-Backups: Backup error: ", err);
                     }
                 }
             }
         }
 
-        console.log(`Backup to ${pathPrefix} ${finalStatus}!`);
+        console.log(`Aut-O-Backups: Backup to ${pathPrefix} ${finalStatus}!`);
 
         if (!Platform.isMobile && this.dropboxBackupsRibbonIcon) {
             this.dropboxBackupsRibbonIcon.setAttribute(
@@ -211,6 +212,20 @@ export default class DropboxBackups extends Plugin {
                 "dropbox-backups-upload-complete"
             );
         }
+    }
+
+    async backup() {
+        window.setTimeout(
+            async () => {
+                await this._backup();
+            },
+            // Delay everything 10 minutes, since syncing
+            // right when the app launches is kind of
+            // annoying and could back up old
+            // versions if other syncs
+            // are executing.
+            oneMinute * 10
+        );
     }
 
     async setupAuth() {
@@ -290,13 +305,21 @@ export default class DropboxBackups extends Plugin {
     }
 
     async attemptAuth() {
-        if (this.dropboxBackupsTokenStore) {
-            console.log("Attempting stored auth ...");
-            await this.doStoredAuth();
-        } else {
-            console.log("Attempting auth setup ...");
-            await this.setupAuth();
+        try {
+            if (this.dropboxBackupsTokenStore) {
+                console.log("Aut-O-Backups: Attempting stored auth ...");
+                await this.doStoredAuth();
+            } else {
+                console.log("Aut-O-Backups: Attempting auth setup ...");
+                await this.setupAuth();
+            }
+        } catch (error) {
+            console.error("Aut-O-Backups: Auth error: ", error);
         }
+        setIcon(
+            this.dropboxBackupsRibbonIcon,
+            "dropbox-backups-upload-complete"
+        );
     }
 
     async attemptBackup() {
@@ -377,7 +400,7 @@ export default class DropboxBackups extends Plugin {
                     }
                 },
                 // Every 20 minutes:
-                60000 * 20
+                oneMinute * 20
             )
         );
     }

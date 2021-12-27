@@ -1,6 +1,6 @@
 ## Obsidian Aut-O-Backups
 
-Automated backups to Dropbox of your entire vault every 20 minutes.
+Automated backups to Dropbox of your entire vault every 20 minutes (starting after a 10 minute delay).
 
 ![Obsidian Aut-O-Backups logo](Aut-O-Backups_256x256.png)
 
@@ -20,7 +20,7 @@ We use fractional seconds to prevent collisions with ad hoc backups.
 
 ### Usage
 
-Click the icon to authenticate with Dropbox. After that, backups will happen every 20 minutes. You can also fire off a backup at any time by clicking the ribbon icon.
+Click the icon to authenticate with Dropbox. After that, backups will happen every 20 minutes (starting after a 10 minute delay). You can also fire off a backup at any time by clicking the ribbon icon.
 
 The slashed cloud indicates that you need to authenticate with Dropbox:
 
