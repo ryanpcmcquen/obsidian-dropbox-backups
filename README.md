@@ -26,7 +26,7 @@ The slashed cloud indicates that you need to authenticate with Dropbox:
 
 <img width="222" alt="Screen Shot 2021-06-07 at 9 57 49 AM" src="https://user-images.githubusercontent.com/772937/121060384-68e7f600-c777-11eb-98df-093799e28eca.png">
 
-The large arrow indicates the the upload has started:
+The large arrow indicates the upload has started:
 
 <img width="353" alt="Screen Shot 2021-06-07 at 9 58 19 AM" src="https://user-images.githubusercontent.com/772937/121060390-6ab1b980-c777-11eb-8663-86d53f6ad893.png">
 
